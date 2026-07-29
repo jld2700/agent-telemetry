@@ -83,6 +83,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 SOURCE_CLI="${SCRIPT_DIR}/src/cli.ts"
 SOURCE_PACKAGE="${SCRIPT_DIR}/package.json"
 
+# ─── Proxy support ────────────────────────────────────────────────────────────
+# Auto-detect proxy from env vars, or let user set INSTALL_PROXY
+if [[ -z "${INSTALL_PROXY:-}" ]]; then
+  INSTALL_PROXY="${HTTPS_PROXY:-${https_proxy:-${HTTP_PROXY:-${http_proxy:-}}}}"
+fi
+if [[ -n "$INSTALL_PROXY" ]]; then
+  export HTTPS_PROXY="$INSTALL_PROXY" HTTP_PROXY="$INSTALL_PROXY" https_proxy="$INSTALL_PROXY" http_proxy="$INSTALL_PROXY"
+  info "Using proxy: ${INSTALL_PROXY}"
+fi
+
+# Download with timeout to prevent hanging
+DOWNLOAD_TIMEOUT="${DOWNLOAD_TIMEOUT:-120}"
+
 get_binary() {
     # Option A: Build from source if bun is available and we have the source
     if command -v bun &>/dev/null && [[ -f "$SOURCE_CLI" ]]; then
@@ -116,7 +129,7 @@ get_binary() {
     local RELEASE_INFO=""
 
     if command -v curl &>/dev/null; then
-        RELEASE_INFO=$(curl -fsSL "$GITHUB_LATEST" 2>/dev/null || echo "")
+        RELEASE_INFO=$(curl -fsSL --max-time 30 "$GITHUB_LATEST" 2>/dev/null || echo "")
     elif command -v wget &>/dev/null; then
         RELEASE_INFO=$(wget -qO- "$GITHUB_LATEST" 2>/dev/null || echo "")
     else
@@ -154,7 +167,7 @@ get_binary() {
     local TMP_BIN="${BINARY_PATH}.tmp"
 
     if command -v curl &>/dev/null; then
-        curl -fsSL "$DOWNLOAD_URL" -o "$TMP_BIN"
+        curl -fsSL --max-time "$DOWNLOAD_TIMEOUT" "$DOWNLOAD_URL" -o "$TMP_BIN"
     else
         wget -qO "$TMP_BIN" "$DOWNLOAD_URL"
     fi
