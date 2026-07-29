@@ -4,15 +4,15 @@
  * Injects/removes OTLP telemetry environment variables into:
  *   - Claude Code: ~/.claude/settings.json (env section)
  *   - Codex:       ~/.codex/config.toml   ([otel] section)
+ *   - OpenCode:    ~/.zshrc or ~/.bashrc  (OTEL_EXPORTER_* env vars)
  *
- * Both injection points are idempotent: running twice doesn't duplicate or
+ * All injection points are idempotent: running twice doesn't duplicate or
  * corrupt anything. Removal preserves all unrelated keys.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { logger } from './logger.js';
-import { generateOpenCodePluginJS, OPENCODE_PLUGIN_FILENAME } from './opencode-plugin.js';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -70,16 +70,20 @@ function getCodexConfigPath(): string {
   return join(process.env.HOME ?? '~', '.codex', 'config.toml');
 }
 
-function getOpenCodePluginsDir(): string {
-  return join(process.env.HOME ?? '~', '.config', 'opencode', 'plugins');
-}
-
-function getOpenCodePluginPath(): string {
-  return join(getOpenCodePluginsDir(), OPENCODE_PLUGIN_FILENAME);
-}
-
 function getDataDir(): string {
   return join(process.env.HOME ?? '~', '.agent-telemetry');
+}
+
+/** Detect the user's shell profile file (~/.zshrc on macOS, ~/.bashrc on Linux). */
+function getShellProfilePath(): string {
+  const home = process.env.HOME ?? '~';
+  // On macOS the default shell is zsh; on Linux it's bash.
+  // Fall back to ~/.bashrc if ~/.zshrc doesn't exist and we're not on macOS.
+  const shell = process.env.SHELL ?? '';
+  if (shell.includes('zsh') || process.platform === 'darwin') {
+    return join(home, '.zshrc');
+  }
+  return join(home, '.bashrc');
 }
 
 // ─── Claude Code injection ───────────────────────────────────────────────────
@@ -337,78 +341,99 @@ export function removeCodexOtlp(): boolean {
   return true;
 }
 
-// ─── OpenCode plugin injection ──────────────────────────────────────────────
+// ─── OpenCode env var injection (shell profile) ──────────────────────────────
+
+/** Marker comments that delimit agent-telemetry's injected block in the shell profile */
+const OPENCODE_BEGIN_MARKER = '# agent-telemetry:opencode';
+const OPENCODE_END_MARKER = '# end agent-telemetry:opencode';
 
 /**
- * Inject the OpenCode plugin JS file at ~/.config/opencode/plugins/agent-telemetry.js.
+ * Build the OTLP env var block for OpenCode.
+ * OpenCode reads standard OTEL_EXPORTER_OTLP_* env vars at runtime.
+ */
+function buildOpenCodeEnvBlock(endpoint: string): string {
+  const base = endpoint.replace(/\/+$/, '');
+  return [
+    OPENCODE_BEGIN_MARKER,
+    `export OTEL_EXPORTER_OTLP_ENDPOINT="${base}"`,
+    `export OTEL_EXPORTER_OTLP_PROTOCOL="http/json"`,
+    OPENCODE_END_MARKER,
+  ].join('\n');
+}
+
+/**
+ * Inject OTLP env vars into the user's shell profile (~/.zshrc or ~/.bashrc).
  *
- * OpenCode does not have built-in OTLP support — we generate a self-contained
- * JS plugin that hooks into tool.execute.before/after and event callbacks,
- * constructs OTLP JSON log records, and POSTs them to agent-telemetry.
+ * OpenCode natively sends OTLP when OTEL_EXPORTER_OTLP_ENDPOINT is set in the
+ * environment. Since OpenCode is a CLI tool, env vars must be in the shell
+ * profile to be available when the user runs `opencode`.
  *
- * - Creates the plugins directory if it doesn't exist
- * - Overwrites the plugin file (idempotent — always writes latest version)
+ * - Creates the shell profile file if it doesn't exist
+ * - Replaces any existing agent-telemetry block (idempotent)
+ * - Preserves all other content in the file
  *
  * @returns InjectionResult describing what changed
  */
 export function injectOpenCodeOtlp(endpoint: string = DEFAULT_OTLP_ENDPOINT): InjectionResult {
-  const pluginPath = getOpenCodePluginPath();
-  const pluginsDir = getOpenCodePluginsDir();
+  const profilePath = getShellProfilePath();
+  const envBlock = buildOpenCodeEnvBlock(endpoint);
 
-  if (!existsSync(pluginsDir)) {
-    mkdirSync(pluginsDir, { recursive: true });
+  let content = '';
+  if (existsSync(profilePath)) {
+    content = readFileSync(profilePath, 'utf-8');
   }
 
-  const pluginJS = generateOpenCodePluginJS(endpoint);
+  // Check if our block already exists with the correct endpoint
+  const blockRegex = new RegExp(
+    `${OPENCODE_BEGIN_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?${OPENCODE_END_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+  );
+  const existingBlock = content.match(blockRegex);
 
-  // Check if already up to date
-  let changed = true;
-  if (existsSync(pluginPath)) {
-    try {
-      const existing = readFileSync(pluginPath, 'utf-8');
-      if (existing === pluginJS) {
-        changed = false;
-      }
-    } catch {
-      // File might be unreadable — overwrite
-    }
+  if (existingBlock && existingBlock[0] === envBlock) {
+    logger.debug('OpenCode OTLP env vars already up to date', { path: profilePath });
+    return { changed: false, path: profilePath, keysAdded: [], keysUpdated: [] };
   }
 
-  if (changed) {
-    writeFileSync(pluginPath, pluginJS);
-    logger.info('Generated OpenCode plugin', { path: pluginPath });
-  } else {
-    logger.debug('OpenCode plugin already up to date', { path: pluginPath });
+  // Remove any existing agent-telemetry block, then append the new one
+  let cleaned = content.replace(blockRegex, '').replace(/\n{3,}/g, '\n\n');
+  // Ensure file ends with newline before appending
+  if (cleaned && !cleaned.endsWith('\n')) {
+    cleaned = `${cleaned}\n`;
   }
+  const newContent = `${cleaned}\n${envBlock}\n`;
+
+  writeFileSync(profilePath, newContent);
+  logger.info('Injected OTLP env vars for OpenCode into shell profile', { path: profilePath });
 
   return {
-    changed,
-    path: pluginPath,
-    keysAdded: changed ? [OPENCODE_PLUGIN_FILENAME] : [],
+    changed: true,
+    path: profilePath,
+    keysAdded: ['OTEL_EXPORTER_OTLP_ENDPOINT', 'OTEL_EXPORTER_OTLP_PROTOCOL'],
     keysUpdated: [],
   };
 }
 
 /**
- * Remove the agent-telemetry plugin file from OpenCode's plugins directory.
+ * Remove agent-telemetry's OTLP env var block from the user's shell profile.
+ * Preserves all other content.
  *
- * @returns true if the plugin was removed
+ * @returns true if anything was removed
  */
 export function removeOpenCodeOtlp(): boolean {
-  const pluginPath = getOpenCodePluginPath();
-  if (!existsSync(pluginPath)) return false;
+  const profilePath = getShellProfilePath();
+  if (!existsSync(profilePath)) return false;
 
-  try {
-    unlinkSync(pluginPath);
-    logger.info('Removed OpenCode plugin', { path: pluginPath });
-    return true;
-  } catch (err) {
-    logger.warn('Failed to remove OpenCode plugin: {error}', {
-      path: pluginPath,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return false;
-  }
+  const content = readFileSync(profilePath, 'utf-8');
+
+  const blockRegex = new RegExp(
+    `${OPENCODE_BEGIN_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?${OPENCODE_END_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n*`,
+  );
+  if (!blockRegex.test(content)) return false;
+
+  const cleaned = content.replace(blockRegex, '').replace(/\n{3,}/g, '\n\n');
+  writeFileSync(profilePath, cleaned);
+  logger.info('Removed OTLP env vars for OpenCode from shell profile', { path: profilePath });
+  return true;
 }
 
 // ─── Combined injection/removal ──────────────────────────────────────────────
@@ -432,13 +457,13 @@ export function injectAllOtlp(endpoint: string = DEFAULT_OTLP_ENDPOINT): {
     logger.info('Codex not detected (~/.codex not found), skipping Codex OTLP injection');
   }
 
-  // Only inject into OpenCode if ~/.config/opencode exists (don't create the config dir)
+  // Only inject OpenCode env vars if OpenCode is installed (~/.config/opencode exists)
   let opencode: InjectionResult | null = null;
   const opencodeDir = join(process.env.HOME ?? '~', '.config', 'opencode');
   if (existsSync(opencodeDir)) {
     opencode = injectOpenCodeOtlp(endpoint);
   } else {
-    logger.info('OpenCode not detected (~/.config/opencode not found), skipping OpenCode plugin injection');
+    logger.info('OpenCode not detected (~/.config/opencode not found), skipping OpenCode OTLP injection');
   }
 
   return { claudeCode, codex, opencode };

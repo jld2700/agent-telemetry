@@ -409,46 +409,58 @@ Codex reads standard OpenTelemetry environment variables. Ensure `agent-telemetr
 
 ### OpenCode
 
-OpenCode does **not** have built-in OTLP support like Claude Code or Codex. Instead, `agent-telemetry` generates a self-contained JS plugin that hooks into OpenCode's callbacks, constructs OTLP log records, and POSTs them to agent-telemetry.
+OpenCode natively sends OTLP telemetry when the `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable is set. Its logs are Effect framework structured logs with rich attributes (`session.id`, `providerID`, `modelID`, `agent`, `mode`, `command`, `step`, etc.).
 
-#### Auto-generated plugin (recommended)
+#### Auto-injection (recommended)
 
-Run `agent-telemetry install` — the installer automatically generates a plugin file at:
+Run `agent-telemetry install` — the installer automatically injects OTLP env vars into your shell profile (`~/.zshrc` on macOS, `~/.bashrc` on Linux):
 
+```bash
+# agent-telemetry:opencode
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:9911/api/otel"
+export OTEL_EXPORTER_OTLP_PROTOCOL="http/json"
+# end agent-telemetry:opencode
 ```
-~/.config/opencode/plugins/agent-telemetry.js
-```
 
-The plugin hooks into OpenCode's `tool.execute.before` / `tool.execute.after` and `event` callbacks and emits two OTLP event types:
+After installation, **restart your shell** (or `source ~/.zshrc`) so the env vars take effect, then launch OpenCode. All session events, LLM calls, tool executions, compaction, and MCP events will be captured.
 
-| Event | Description |
-|---|---|
-| `opencode.tool_call` | Tool execution with name, duration, input/result size, and MCP server detection |
-| `opencode.token_usage` | Token usage per assistant message (input, output, reasoning, cache read/write, cost) |
+The injection is idempotent — re-running `install` overwrites the block with the latest version. It is only injected if `~/.config/opencode` already exists (OpenCode installed).
 
-The plugin is self-contained pure JS (no imports) and is idempotent — re-running `install` overwrites it with the latest version. It is only generated if `~/.config/opencode` already exists (OpenCode installed).
-
-To remove the plugin, run `agent-telemetry uninstall`.
+To remove the env vars, run `agent-telemetry uninstall`.
 
 #### Manual configuration
 
 If you prefer to set the OTLP endpoint manually via environment variables:
 
 ```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:9911
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:9911/api/otel
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
 ```
 
-Or configure in your OpenCode settings file (`~/.opencode/config.json` or equivalent):
+#### Captured events
 
-```json
-{
-  "otel": {
-    "endpoint": "http://127.0.0.1:9911",
-    "protocol": "http/json"
-  }
-}
-```
+OpenCode's native OTLP logs are mapped to `opencode.<message>` event names. Key events include:
+
+| Event | Category | Description |
+|---|---|---|
+| `opencode.stream` | api | LLM API call (providerID, modelID, session.id, agent, mode) |
+| `opencode.command` | user_prompt | User command (session.id, command, agent) |
+| `opencode.created` | session | Session created |
+| `opencode.loop` | session | Inference loop step (session.id, step) |
+| `opencode.cancel` | session | Cancel (session.id) |
+| `opencode.pruned` | compaction | Context pruned (count, total) |
+| `opencode.pruning` | compaction | Context pruning started |
+| `opencode.tail fallback` | compaction | Tail fallback compaction (budget, size, total) |
+| `opencode.found` | compaction | Compaction result (pruned, total) |
+| `opencode.llm runtime selected` | api | Runtime selection |
+| `opencode.unreverting` | session | Session revert |
+| `opencode.exiting loop` | session | Loop exit (session.id) |
+| `opencode.mcp resource` | mcp | MCP resource access |
+| `opencode.failed to generate title` | error | Error: title generation |
+| `opencode.stream error` | error | Error: stream error |
+| `opencode.process` | error | Process event |
+
+OpenCode also sends OTLP traces (spans like `Tool.execute` with `tool.name`, `session.id`, etc.) — these are handled by the traces pass-through and require no additional configuration.
 
 ---
 

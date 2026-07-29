@@ -13,6 +13,8 @@ import {
 	DEFAULT_OTLP_ENDPOINT,
 	injectClaudeCodeOtlp,
 	removeClaudeCodeOtlp,
+	injectOpenCodeOtlp,
+	removeOpenCodeOtlp,
 } from "../../src/utils/otlp-inject.js";
 
 let tempHome: string;
@@ -164,5 +166,117 @@ describe("removeClaudeCodeOtlp", () => {
 		// Other env var is preserved
 		const settings = readClaudeSettings();
 		expect((settings.env as Record<string, string>).FOO).toBe("bar");
+	});
+});
+
+// ─── OpenCode injection (shell profile env vars) ──────────────────────────────
+
+function getShellProfilePath(): string {
+	// Match the logic in otlp-inject.ts
+	const shell = process.env.SHELL ?? "";
+	if (shell.includes("zsh") || process.platform === "darwin") {
+		return join(tempHome, ".zshrc");
+	}
+	return join(tempHome, ".bashrc");
+}
+
+function readShellProfile(): string {
+	const p = getShellProfilePath();
+	return existsSync(p) ? readFileSync(p, "utf-8") : "";
+}
+
+describe("injectOpenCodeOtlp", () => {
+	test("writes OTEL env vars to shell profile", () => {
+		const result = injectOpenCodeOtlp();
+		expect(result.changed).toBe(true);
+		expect(result.path).toBe(getShellProfilePath());
+
+		const content = readShellProfile();
+		expect(content).toContain("agent-telemetry:opencode");
+		expect(content).toContain('OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:9911/api/otel"');
+		expect(content).toContain('OTEL_EXPORTER_OTLP_PROTOCOL="http/json"');
+		expect(content).toContain("end agent-telemetry:opencode");
+	});
+
+	test("creates shell profile if it does not exist", () => {
+		expect(existsSync(getShellProfilePath())).toBe(false);
+		injectOpenCodeOtlp();
+		expect(existsSync(getShellProfilePath())).toBe(true);
+	});
+
+	test("preserves existing content in shell profile", () => {
+		const profilePath = getShellProfilePath();
+		writeFileSync(profilePath, 'export MY_VAR="hello"\nalias ll="ls -la"\n');
+
+		injectOpenCodeOtlp();
+		const content = readShellProfile();
+		expect(content).toContain('export MY_VAR="hello"');
+		expect(content).toContain('alias ll="ls -la"');
+		expect(content).toContain("agent-telemetry:opencode");
+	});
+
+	test("idempotent — running twice does not report changes", () => {
+		const first = injectOpenCodeOtlp();
+		expect(first.changed).toBe(true);
+		expect(first.keysAdded.length).toBeGreaterThan(0);
+
+		const second = injectOpenCodeOtlp();
+		expect(second.changed).toBe(false);
+		expect(second.keysAdded).toEqual([]);
+		expect(second.keysUpdated).toEqual([]);
+	});
+
+	test("custom endpoint is reflected in env vars", () => {
+		const customEndpoint = "http://10.0.0.1:8080/api/otel";
+		injectOpenCodeOtlp(customEndpoint);
+		const content = readShellProfile();
+		expect(content).toContain(`OTEL_EXPORTER_OTLP_ENDPOINT="${customEndpoint}"`);
+	});
+
+	test("replaces existing block when endpoint changes", () => {
+		injectOpenCodeOtlp("http://10.0.0.1:8080/api/otel");
+		let content = readShellProfile();
+		expect(content).toContain("10.0.0.1:8080");
+
+		injectOpenCodeOtlp("http://192.168.1.1:9090/api/otel");
+		content = readShellProfile();
+		expect(content).not.toContain("10.0.0.1:8080");
+		expect(content).toContain("192.168.1.1:9090");
+		// Should only have one begin marker (block was replaced, not duplicated)
+		const matches = content.match(/^# agent-telemetry:opencode$/gm);
+		expect(matches).toHaveLength(1);
+	});
+});
+
+describe("removeOpenCodeOtlp", () => {
+	test("removes agent-telemetry block but preserves other content", () => {
+		const profilePath = getShellProfilePath();
+		writeFileSync(profilePath, 'export MY_VAR="hello"\nalias ll="ls -la"\n');
+
+		injectOpenCodeOtlp();
+		const removed = removeOpenCodeOtlp();
+		expect(removed).toBe(true);
+
+		const content = readShellProfile();
+		expect(content).not.toContain("agent-telemetry:opencode");
+		expect(content).not.toContain("OTEL_EXPORTER_OTLP_ENDPOINT");
+		expect(content).toContain('export MY_VAR="hello"');
+		expect(content).toContain('alias ll="ls -la"');
+	});
+
+	test("returns false when shell profile does not exist", () => {
+		expect(existsSync(getShellProfilePath())).toBe(false);
+		const removed = removeOpenCodeOtlp();
+		expect(removed).toBe(false);
+	});
+
+	test("returns false when no agent-telemetry block present", () => {
+		const profilePath = getShellProfilePath();
+		writeFileSync(profilePath, 'export FOO="bar"\n');
+		const removed = removeOpenCodeOtlp();
+		expect(removed).toBe(false);
+		// Other content preserved
+		const content = readShellProfile();
+		expect(content).toContain('export FOO="bar"');
 	});
 });

@@ -136,6 +136,24 @@ export async function statusCommand(): Promise<void> {
     console.log(`  ${C.dim}Codex:${C.reset}        ${C.dim}not detected${C.reset}`);
   }
 
+  // Check OpenCode injection (shell profile env vars)
+  const opencodeDir = join(process.env.HOME ?? '~', '.config', 'opencode');
+  if (existsSync(opencodeDir)) {
+    const shell = process.env.SHELL ?? '';
+    const profilePath = shell.includes('zsh') || process.platform === 'darwin'
+      ? join(process.env.HOME ?? '~', '.zshrc')
+      : join(process.env.HOME ?? '~', '.bashrc');
+    if (existsSync(profilePath)) {
+      const content = (await import('fs')).readFileSync(profilePath, 'utf-8');
+      const hasOtel = content.includes('agent-telemetry:opencode');
+      console.log(`  ${C.dim}OpenCode:${C.reset}     ${hasOtel ? `${C.green}✓ injected${C.reset}` : `${C.yellow}⚠ not injected${C.reset}`}  ${C.dim}(${profilePath})${C.reset}`);
+    } else {
+      console.log(`  ${C.dim}OpenCode:${C.reset}     ${C.dim}detected, no shell profile${C.reset}`);
+    }
+  } else {
+    console.log(`  ${C.dim}OpenCode:${C.reset}     ${C.dim}not detected${C.reset}`);
+  }
+
   console.log();
 }
 

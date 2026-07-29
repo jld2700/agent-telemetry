@@ -48,8 +48,24 @@ agents:
 
   opencode:
     log_events:
-      mode: all
-      list: []
+      mode: allow
+      list:
+        - opencode.stream                          # LLM API call start (providerID, modelID, session.id, agent, mode)
+        - opencode.command                         # User command (session.id, command, agent)
+        - opencode.created                         # Session created
+        - opencode.loop                            # Inference loop step (session.id, step)
+        - opencode.cancel                          # Cancel (session.id)
+        - opencode.pruned                          # Context pruned (count, total)
+        - opencode.pruning                         # Context pruning started
+        - opencode.tail fallback                   # Tail fallback compaction (budget, size, total)
+        - opencode.found                           # Compaction result (pruned, total)
+        - opencode.llm runtime selected            # Runtime selection
+        - opencode.unreverting                     # Session revert
+        - opencode.exiting loop                    # Loop exit (session.id)
+        - opencode.mcp resource                    # MCP resource access
+        - opencode.failed to generate title        # Error: title generation
+        - opencode.stream error                    # Error: stream error
+        - opencode.process                         # Process event
     metrics:
       mode: all
       list: []

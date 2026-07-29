@@ -1,15 +1,23 @@
 /**
  * OTLP logs parser for OpenCode telemetry.
  *
- * Ported from DCC's src/daemon/routes/otel-opencode-logs.ts.
- * Discriminated by the `event.name` attribute, mirroring otel-codex-logs.ts.
+ * OpenCode natively sends OTLP when OTEL_EXPORTER_OTLP_ENDPOINT is set.
+ * Its logs are Effect framework structured logs:
+ *   - body.stringValue = message text (e.g. "stream", "command", "created")
+ *   - attributes = structured fields (e.g. session.id, providerID, modelID, agent, mode)
+ *   - NO event.name attribute (unlike Codex)
+ *   - resource.attributes has service.name = "opencode"
+ *
+ * The event_name is constructed as `opencode.` + body.stringValue.
+ * If body.stringValue is missing, the record is skipped.
  */
 import type { TelemetryConfig } from '../config.js';
-import { shouldCollect, inferAgentKey } from '../utils/filter.js';
+import { shouldCollect } from '../utils/filter.js';
 import type { OtlpAttribute } from './types.js';
 
 type OpencodeOtlpLogRecord = {
   timeUnixNano?: string;
+  body?: { stringValue?: string } | null;
   attributes?: OtlpAttribute[];
 };
 
@@ -56,10 +64,64 @@ function attrsToJson(attributes: OtlpAttribute[] | undefined): string {
   return JSON.stringify(obj);
 }
 
-function getCategory(eventName: string, hasMcpServer: boolean): string | null {
-  if (eventName === 'opencode.token_usage') return 'api';
-  if (eventName === 'opencode.tool_call') return hasMcpServer ? 'mcp' : 'tool';
-  return null;
+/**
+ * Map OpenCode message text → category.
+ * Returns null for messages that should be dropped entirely.
+ */
+function getCategory(message: string): string | null {
+  // LLM/API events
+  if (
+    message === 'stream' ||
+    message === 'llm runtime selected' ||
+    message === 'native runtime unavailable; falling back to ai-sdk'
+  ) {
+    return 'api';
+  }
+
+  // User interaction
+  if (message === 'command') return 'user_prompt';
+
+  // Session lifecycle
+  if (['created', 'loop', 'cancel', 'unreverting', 'exiting loop', 'session.id'].includes(message)) {
+    return 'session';
+  }
+
+  // Compaction
+  if (['pruned', 'pruning', 'tail fallback', 'found', 'prune'].includes(message)) {
+    return 'compaction';
+  }
+
+  // MCP
+  if (message === 'mcp resource') return 'mcp';
+
+  // Errors (message starts with "failed" or "invalid", or known error messages)
+  if (
+    message.startsWith('failed') ||
+    message.startsWith('invalid') ||
+    message === 'stream error' ||
+    message === 'process'
+  ) {
+    return 'error';
+  }
+
+  // File operations
+  if (['file', 'find file', 'resolved path'].includes(message)) return 'tool';
+
+  // Sync/connection events
+  if (
+    message.includes('sync') ||
+    message.includes('connected') ||
+    message.includes('disconnected') ||
+    message.includes('disposal')
+  ) {
+    return 'other';
+  }
+
+  // Shell
+  if (message === 'shell tool using shell') return 'tool';
+
+  // Everything else
+  return 'other';
 }
 
 export function parseOpencodeOtlpLogRecord(
@@ -68,31 +130,43 @@ export function parseOpencodeOtlpLogRecord(
   resourceJson: string,
   config?: TelemetryConfig,
 ): OpencodeLogEventInsert | null {
-  const attrs = record.attributes ?? [];
-  const eventName = getStringAttr(attrs, 'event.name');
-  if (!eventName) return null;
+  // Only process records from OpenCode (service.name = "opencode" in resource)
+  // This prevents swallowing Claude Code or Codex events that also have body.stringValue.
+  try {
+    const resource = JSON.parse(resourceJson) as Record<string, unknown>;
+    if (resource['service.name'] !== 'opencode') return null;
+  } catch {
+    return null;
+  }
+
+  const message = record.body?.stringValue;
+  if (!message) return null;
+
+  // Construct event_name: opencode.<message>
+  const eventName = `opencode.${message}`;
 
   // Config-based filtering: check if this event should be collected
   const agentsConfig = config?.agents ?? {};
-  if (!shouldCollect(eventName, inferAgentKey(eventName), 'log_events', agentsConfig)) return null;
+  if (!shouldCollect(eventName, 'opencode', 'log_events', agentsConfig)) return null;
 
-  const hasMcpServer = getStringAttr(attrs, 'mcp_server') !== undefined;
-  const category = getCategory(eventName, hasMcpServer);
+  const attrs = record.attributes ?? [];
+  const category = getCategory(message);
   if (!category) return null;
 
-  const toolName = eventName === 'opencode.tool_call' ? (getStringAttr(attrs, 'tool_name') ?? null) : null;
+  const toolName =
+    getStringAttr(attrs, 'tool.name') ?? getStringAttr(attrs, 'tool_name') ?? null;
 
   return {
     provider: 'opencode',
     category,
     event_name: eventName,
     tool_name: toolName,
-    success: null,
+    success: null, // OpenCode logs don't have a success field
     session_id: getStringAttr(attrs, 'session.id') ?? null,
     user_id: userId,
     attributes: attrsToJson(attrs),
     resource: resourceJson,
-    duration_ms: getIntAttr(attrs, 'duration_ms'),
+    duration_ms: getIntAttr(attrs, 'duration_ms') ?? getIntAttr(attrs, 'duration'),
     timestamp_nano: record.timeUnixNano ?? null,
   };
 }

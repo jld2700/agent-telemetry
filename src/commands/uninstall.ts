@@ -6,7 +6,7 @@
  *   2. Remove the service file (plist/systemd)
  *   3. Remove OTLP env vars from Claude Code's ~/.claude/settings.json
  *   4. Remove OTLP config from Codex's ~/.codex/config.toml
- *   5. Remove OpenCode plugin from ~/.config/opencode/plugins/
+ *   5. Remove OTLP env vars from shell profile for OpenCode
  *   6. Optionally remove data directory (--purge)
  */
 
@@ -89,12 +89,12 @@ export async function uninstallCommand(opts: UninstallOptions = {}): Promise<voi
     console.log(`  ${C.dim}→ No agent-telemetry [otel] sections found${C.reset}`);
   }
 
-  // ─── Step 5: Remove OpenCode plugin ───────────────────────────────────────
-  console.log(`${C.dim}⑤ Removing OpenCode plugin…${C.reset}`);
+  // ─── Step 5: Remove OpenCode env vars ──────────────────────────────────────
+  console.log(`${C.dim}⑤ Removing OpenCode OTLP env vars…${C.reset}`);
   if (results.opencodeRemoved) {
-    console.log(`  ${C.green}✓${C.reset} Removed ~/.config/opencode/plugins/agent-telemetry.js`);
+    console.log(`  ${C.green}✓${C.reset} Removed OTLP env vars from shell profile`);
   } else {
-    console.log(`  ${C.dim}→ No agent-telemetry plugin found${C.reset}`);
+    console.log(`  ${C.dim}→ No agent-telemetry env vars found${C.reset}`);
   }
 
   // ─── Step 6: Optionally purge data ───────────────────────────────────────

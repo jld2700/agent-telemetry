@@ -9,7 +9,7 @@
  *   4. Start the service
  *   5. Inject OTLP env vars into Claude Code's ~/.claude/settings.json
  *   6. Inject OTLP config into Codex's ~/.codex/config.toml (if installed)
- *   7. Inject OpenCode plugin into ~/.config/opencode/plugins/ (if installed)
+ *   7. Inject OTLP env vars into shell profile for OpenCode (if installed)
  *   8. Print next steps
  */
 
@@ -132,9 +132,9 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
     }
 
     if (results.opencode) {
-      console.log(`${C.dim}⑦ Injecting OpenCode plugin…${C.reset}`);
+      console.log(`${C.dim}⑦ Injecting OTLP env vars for OpenCode…${C.reset}`);
       if (results.opencode.changed) {
-        console.log(`  ${C.green}✓${C.reset} Generated ${results.opencode.path}`);
+        console.log(`  ${C.green}✓${C.reset} Updated ${results.opencode.path}`);
       } else {
         console.log(`  ${C.dim}→ Already up to date: ${results.opencode.path}${C.reset}`);
       }
