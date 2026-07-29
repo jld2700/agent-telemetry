@@ -1,0 +1,19 @@
+{
+  "name": "agent-telemetry",
+  "version": "0.1.0",
+  "description": "OpenTelemetry collector for AI coding agents — auto-collects tool calls, token usage, and session events",
+  "author": {
+    "name": "agent-telemetry"
+  },
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA": "1",
+    "OTEL_TRACES_EXPORTER": "otlp",
+    "OTEL_METRICS_EXPORTER": "otlp",
+    "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:9911/api/otel",
+    "OTEL_LOG_TOOL_DETAILS": "1",
+    "CLAUDE_CODE_PROPAGATE_TRACEPARENT": "1"
+  }
+}

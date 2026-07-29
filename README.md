@@ -373,6 +373,29 @@ Or add to your `~/.claude/settings.json`:
 
 Start `agent-telemetry`, then launch Claude Code. All tool calls, model invocations, and session events will be captured.
 
+#### Claude Code Plugin (auto-config)
+
+Instead of setting environment variables manually, you can install the bundled Claude Code plugin. The plugin auto-injects all the OTLP environment variables above (plus telemetry enablement flags) directly into `~/.claude/settings.json` — no manual `.env` edits required.
+
+**Prerequisite:** Install and start the agent-telemetry service first (see [Quick Start](#quick-start)).
+
+```bash
+# Install the plugin from the agent-telemetry repo
+claude plugin install /path/to/agent-telemetry/plugin
+```
+
+After installing, **restart Claude Code**. The following env vars are injected automatically:
+
+- `CLAUDE_CODE_ENABLE_TELEMETRY=1`
+- `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`
+- `OTEL_TRACES_EXPORTER=otlp` / `OTEL_METRICS_EXPORTER=otlp` / `OTEL_LOGS_EXPORTER=otlp`
+- `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`
+- `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:9911/api/otel`
+- `OTEL_LOG_TOOL_DETAILS=1`
+- `CLAUDE_CODE_PROPAGATE_TRACEPARENT=1`
+
+Telemetry will be automatically collected on every session. To remove the config, run `claude plugin uninstall agent-telemetry`.
+
 ### Codex (OpenAI)
 
 Set the OTLP endpoint before launching Codex:
