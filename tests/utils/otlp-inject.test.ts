@@ -12,8 +12,8 @@ import { join } from "node:path";
 import {
 	DEFAULT_OTLP_ENDPOINT,
 	injectClaudeCodeOtlp,
-	removeClaudeCodeOtlp,
 	injectOpenCodeOtlp,
+	removeClaudeCodeOtlp,
 	removeOpenCodeOtlp,
 } from "../../src/utils/otlp-inject.js";
 
@@ -193,7 +193,9 @@ describe("injectOpenCodeOtlp", () => {
 
 		const content = readShellProfile();
 		expect(content).toContain("agent-telemetry:opencode");
-		expect(content).toContain('OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:9911/api/otel"');
+		expect(content).toContain(
+			'OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:9911/api/otel"',
+		);
 		expect(content).toContain('OTEL_EXPORTER_OTLP_PROTOCOL="http/json"');
 		expect(content).toContain("end agent-telemetry:opencode");
 	});
@@ -230,7 +232,9 @@ describe("injectOpenCodeOtlp", () => {
 		const customEndpoint = "http://10.0.0.1:8080/api/otel";
 		injectOpenCodeOtlp(customEndpoint);
 		const content = readShellProfile();
-		expect(content).toContain(`OTEL_EXPORTER_OTLP_ENDPOINT="${customEndpoint}"`);
+		expect(content).toContain(
+			`OTEL_EXPORTER_OTLP_ENDPOINT="${customEndpoint}"`,
+		);
 	});
 
 	test("replaces existing block when endpoint changes", () => {

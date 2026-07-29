@@ -26,7 +26,10 @@ const RESOURCE_JSON = '{"service.name":"opencode"}';
 
 function makeRecord(
 	message: string | undefined,
-	attributes: Array<{ key: string; value: { stringValue?: string; intValue?: number } }> = [],
+	attributes: Array<{
+		key: string;
+		value: { stringValue?: string; intValue?: number };
+	}> = [],
 	timeUnixNano = "1737500000000000000",
 ) {
 	return {
@@ -47,16 +50,16 @@ describe("parseOpencodeOtlpLogRecord", () => {
 		]);
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.provider).toBe("opencode");
-		expect(row!.event_name).toBe("opencode.stream");
-		expect(row!.category).toBe("api");
-		expect(row!.session_id).toBe("sess-123");
-		expect(row!.success).toBeNull();
-		expect(row!.tool_name).toBeNull();
-		expect(row!.duration_ms).toBeNull();
-		expect(row!.timestamp_nano).toBe("1737500000000000000");
-		expect(row!.user_id).toBeNull();
-		expect(row!.resource).toBe(RESOURCE_JSON);
+		expect(row?.provider).toBe("opencode");
+		expect(row?.event_name).toBe("opencode.stream");
+		expect(row?.category).toBe("api");
+		expect(row?.session_id).toBe("sess-123");
+		expect(row?.success).toBeNull();
+		expect(row?.tool_name).toBeNull();
+		expect(row?.duration_ms).toBeNull();
+		expect(row?.timestamp_nano).toBe("1737500000000000000");
+		expect(row?.user_id).toBeNull();
+		expect(row?.resource).toBe(RESOURCE_JSON);
 	});
 
 	test("parses a command event (user_prompt)", () => {
@@ -67,16 +70,18 @@ describe("parseOpencodeOtlpLogRecord", () => {
 		]);
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.event_name).toBe("opencode.command");
-		expect(row!.category).toBe("user_prompt");
+		expect(row?.event_name).toBe("opencode.command");
+		expect(row?.category).toBe("user_prompt");
 	});
 
 	test("parses a created event (session lifecycle)", () => {
-		const record = makeRecord("created", [{ key: "session.id", value: { stringValue: "sess-789" } }]);
+		const record = makeRecord("created", [
+			{ key: "session.id", value: { stringValue: "sess-789" } },
+		]);
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.event_name).toBe("opencode.created");
-		expect(row!.category).toBe("session");
+		expect(row?.event_name).toBe("opencode.created");
+		expect(row?.category).toBe("session");
 	});
 
 	test("parses a pruned event (compaction)", () => {
@@ -86,8 +91,8 @@ describe("parseOpencodeOtlpLogRecord", () => {
 		]);
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.event_name).toBe("opencode.pruned");
-		expect(row!.category).toBe("compaction");
+		expect(row?.event_name).toBe("opencode.pruned");
+		expect(row?.category).toBe("compaction");
 	});
 
 	test("parses a mcp resource event", () => {
@@ -97,8 +102,8 @@ describe("parseOpencodeOtlpLogRecord", () => {
 		]);
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.event_name).toBe("opencode.mcp resource");
-		expect(row!.category).toBe("mcp");
+		expect(row?.event_name).toBe("opencode.mcp resource");
+		expect(row?.category).toBe("mcp");
 	});
 
 	test("parses a failed to generate title event (error)", () => {
@@ -107,24 +112,24 @@ describe("parseOpencodeOtlpLogRecord", () => {
 		]);
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.event_name).toBe("opencode.failed to generate title");
-		expect(row!.category).toBe("error");
+		expect(row?.event_name).toBe("opencode.failed to generate title");
+		expect(row?.category).toBe("error");
 	});
 
 	test("parses a stream error event (error)", () => {
 		const record = makeRecord("stream error");
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.event_name).toBe("opencode.stream error");
-		expect(row!.category).toBe("error");
+		expect(row?.event_name).toBe("opencode.stream error");
+		expect(row?.category).toBe("error");
 	});
 
 	test("parses a shell tool using shell event (tool)", () => {
 		const record = makeRecord("shell tool using shell");
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.event_name).toBe("opencode.shell tool using shell");
-		expect(row!.category).toBe("tool");
+		expect(row?.event_name).toBe("opencode.shell tool using shell");
+		expect(row?.category).toBe("tool");
 	});
 
 	test("extracts tool.name attribute into tool_name", () => {
@@ -134,7 +139,7 @@ describe("parseOpencodeOtlpLogRecord", () => {
 		]);
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.tool_name).toBe("edit");
+		expect(row?.tool_name).toBe("edit");
 	});
 
 	test("extracts tool_name attribute into tool_name (fallback)", () => {
@@ -143,7 +148,7 @@ describe("parseOpencodeOtlpLogRecord", () => {
 		]);
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.tool_name).toBe("bash");
+		expect(row?.tool_name).toBe("bash");
 	});
 
 	test("extracts duration_ms from attributes", () => {
@@ -152,7 +157,7 @@ describe("parseOpencodeOtlpLogRecord", () => {
 		]);
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.duration_ms).toBe(1500);
+		expect(row?.duration_ms).toBe(1500);
 	});
 
 	test("falls back to 'duration' attribute for duration_ms", () => {
@@ -161,7 +166,7 @@ describe("parseOpencodeOtlpLogRecord", () => {
 		]);
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.duration_ms).toBe(2000);
+		expect(row?.duration_ms).toBe(2000);
 	});
 
 	test("serializes attributes to JSON", () => {
@@ -172,7 +177,8 @@ describe("parseOpencodeOtlpLogRecord", () => {
 		]);
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		const attrs = JSON.parse(row!.attributes);
+		if (!row) return;
+		const attrs = JSON.parse(row.attributes);
 		expect(attrs["session.id"]).toBe("sess-json");
 		expect(attrs.providerID).toBe("anthropic");
 		expect(attrs.count).toBe("42");
@@ -182,7 +188,7 @@ describe("parseOpencodeOtlpLogRecord", () => {
 		const record = makeRecord("stream", []);
 		const row = parseOpencodeOtlpLogRecord(record, "user-abc", RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.user_id).toBe("user-abc");
+		expect(row?.user_id).toBe("user-abc");
 	});
 
 	test("returns null when body.stringValue is missing", () => {
@@ -213,11 +219,19 @@ describe("parseOpencodeOtlpLogRecord", () => {
 				log_events: { mode: "allow", list: ["opencode.stream"] },
 			},
 		});
-		const streamRecord = makeRecord("stream", [{ key: "session.id", value: { stringValue: "s1" } }]);
-		const commandRecord = makeRecord("command", [{ key: "session.id", value: { stringValue: "s2" } }]);
+		const streamRecord = makeRecord("stream", [
+			{ key: "session.id", value: { stringValue: "s1" } },
+		]);
+		const commandRecord = makeRecord("command", [
+			{ key: "session.id", value: { stringValue: "s2" } },
+		]);
 
-		expect(parseOpencodeOtlpLogRecord(streamRecord, null, RESOURCE_JSON, config)).not.toBeNull();
-		expect(parseOpencodeOtlpLogRecord(commandRecord, null, RESOURCE_JSON, config)).toBeNull();
+		expect(
+			parseOpencodeOtlpLogRecord(streamRecord, null, RESOURCE_JSON, config),
+		).not.toBeNull();
+		expect(
+			parseOpencodeOtlpLogRecord(commandRecord, null, RESOURCE_JSON, config),
+		).toBeNull();
 	});
 
 	test("config filtering: deny mode collects all except listed", () => {
@@ -229,8 +243,12 @@ describe("parseOpencodeOtlpLogRecord", () => {
 		const streamRecord = makeRecord("stream");
 		const commandRecord = makeRecord("command");
 
-		expect(parseOpencodeOtlpLogRecord(streamRecord, null, RESOURCE_JSON, config)).not.toBeNull();
-		expect(parseOpencodeOtlpLogRecord(commandRecord, null, RESOURCE_JSON, config)).toBeNull();
+		expect(
+			parseOpencodeOtlpLogRecord(streamRecord, null, RESOURCE_JSON, config),
+		).not.toBeNull();
+		expect(
+			parseOpencodeOtlpLogRecord(commandRecord, null, RESOURCE_JSON, config),
+		).toBeNull();
 	});
 
 	test("config filtering: all mode collects everything", () => {
@@ -242,29 +260,29 @@ describe("parseOpencodeOtlpLogRecord", () => {
 		const record = makeRecord("some unknown message");
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON, config);
 		expect(row).not.toBeNull();
-		expect(row!.category).toBe("other");
+		expect(row?.category).toBe("other");
 	});
 
 	test("unknown messages get category 'other'", () => {
 		const record = makeRecord("some random unknown event");
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.category).toBe("other");
-		expect(row!.event_name).toBe("opencode.some random unknown event");
+		expect(row?.category).toBe("other");
+		expect(row?.event_name).toBe("opencode.some random unknown event");
 	});
 
 	test("messages containing 'sync' get category 'other'", () => {
 		const record = makeRecord("file system sync");
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.category).toBe("other");
+		expect(row?.category).toBe("other");
 	});
 
 	test("messages containing 'connected' get category 'other'", () => {
 		const record = makeRecord("mcp server connected");
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.category).toBe("other");
+		expect(row?.category).toBe("other");
 	});
 
 	test("loop event gets session category", () => {
@@ -274,15 +292,15 @@ describe("parseOpencodeOtlpLogRecord", () => {
 		]);
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.event_name).toBe("opencode.loop");
-		expect(row!.category).toBe("session");
+		expect(row?.event_name).toBe("opencode.loop");
+		expect(row?.category).toBe("session");
 	});
 
 	test("llm runtime selected event gets api category", () => {
 		const record = makeRecord("llm runtime selected");
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.category).toBe("api");
+		expect(row?.category).toBe("api");
 	});
 
 	test("tail fallback event gets compaction category", () => {
@@ -293,6 +311,6 @@ describe("parseOpencodeOtlpLogRecord", () => {
 		]);
 		const row = parseOpencodeOtlpLogRecord(record, null, RESOURCE_JSON);
 		expect(row).not.toBeNull();
-		expect(row!.category).toBe("compaction");
+		expect(row?.category).toBe("compaction");
 	});
 });

@@ -23,6 +23,8 @@ jobs:
             artifact: agent-telemetry-linux-arm64
 
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

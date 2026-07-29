@@ -12,13 +12,13 @@
  * meaningful to report without a session. user_id is still populated when available.
  */
 
-import type { TelemetryConfig } from '../config.js';
+import type { TelemetryConfig } from "../config.js";
 import {
-  getPendingOtelMetrics,
-  markOtelMetricsDiscarded,
-  markOtelMetricsUploaded,
-} from '../db/index.js';
-import { logger } from '../utils/logger.js';
+	getPendingOtelMetrics,
+	markOtelMetricsDiscarded,
+	markOtelMetricsUploaded,
+} from "../db/index.js";
+import { logger } from "../utils/logger.js";
 
 const METRICS_MAX_RETRIES = 3;
 const METRICS_INITIAL_BACKOFF = 1000;
@@ -30,151 +30,182 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let isRunning = false;
 
 export function startMetricsReporter(config: TelemetryConfig): void {
-  if (timer) return;
-  if (!config.upstream?.url || !config.upstream.report_metrics) {
-    logger.info('Reporter metrics: disabled (no upstream URL or report_metrics=false)');
-    return;
-  }
+	if (timer) return;
+	if (!config.upstream?.url || !config.upstream.report_metrics) {
+		logger.info(
+			"Reporter metrics: disabled (no upstream URL or report_metrics=false)",
+		);
+		return;
+	}
 
-  const intervalMs = config.upstream.interval_ms;
-  timer = setInterval(() => runMetricsReport(config), intervalMs);
-  logger.info('Reporter metrics: started', { intervalMs });
+	const intervalMs = config.upstream.interval_ms;
+	timer = setInterval(() => runMetricsReport(config), intervalMs);
+	logger.info("Reporter metrics: started", { intervalMs });
 }
 
 export function stopMetricsReporter(): void {
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
-    logger.info('Reporter metrics: stopped');
-  }
+	if (timer) {
+		clearInterval(timer);
+		timer = null;
+		logger.info("Reporter metrics: stopped");
+	}
 }
 
 export async function runMetricsReport(config: TelemetryConfig): Promise<void> {
-  if (isRunning) {
-    logger.warn('Reporter metrics: previous run still in progress, skipping this cycle');
-    return;
-  }
-  isRunning = true;
-  try {
-    await runMetricsReportInner(config);
-  } finally {
-    isRunning = false;
-  }
+	if (isRunning) {
+		logger.warn(
+			"Reporter metrics: previous run still in progress, skipping this cycle",
+		);
+		return;
+	}
+	isRunning = true;
+	try {
+		await runMetricsReportInner(config);
+	} finally {
+		isRunning = false;
+	}
 }
 
 async function runMetricsReportInner(config: TelemetryConfig): Promise<void> {
-  if (!config.upstream?.url || !config.upstream.report_metrics) return;
+	if (!config.upstream?.url || !config.upstream.report_metrics) return;
 
-  const baseUrl = config.upstream.url.replace(/\/+$/, '');
-  const url = `${baseUrl}/v1/metrics`;
-  const batchSize = config.upstream.batch_size;
+	const baseUrl = config.upstream.url.replace(/\/+$/, "");
+	const url = `${baseUrl}/v1/metrics`;
+	const batchSize = config.upstream.batch_size;
 
-  const pending = getPendingOtelMetrics(batchSize);
-  if (pending.length === 0) return;
+	const pending = getPendingOtelMetrics(batchSize);
+	if (pending.length === 0) return;
 
-  const records = pending.map((r) => ({
-    id: r.id,
-    provider: r.provider,
-    metric_name: r.metric_name,
-    metric_type: r.metric_type,
-    value: r.value,
-    attributes: parseAttributes(r.id as number, r.attributes as string),
-    resource: parseAttributes(r.id as number, (r.resource as string) ?? '{}'),
-    session_id: r.session_id,
-    user_id: r.user_id,
-    start_time_unix_nano: r.start_time_unix_nano,
-    time_unix_nano: r.time_unix_nano,
-    created_at: r.created_at,
-  }));
-  const ids = pending.map((r) => r.id as number);
+	const records = pending.map((r) => ({
+		id: r.id,
+		provider: r.provider,
+		metric_name: r.metric_name,
+		metric_type: r.metric_type,
+		value: r.value,
+		attributes: parseAttributes(r.id as number, r.attributes as string),
+		resource: parseAttributes(r.id as number, (r.resource as string) ?? "{}"),
+		session_id: r.session_id,
+		user_id: r.user_id,
+		start_time_unix_nano: r.start_time_unix_nano,
+		time_unix_nano: r.time_unix_nano,
+		created_at: r.created_at,
+	}));
+	const ids = pending.map((r) => r.id as number);
 
-  await uploadMetricsBatch(url, { records }, ids, config.upstream.token);
+	await uploadMetricsBatch(url, { records }, ids, config.upstream.token);
 }
 
 /** Parse the stored attributes JSON. Falls back to {} on corrupt rows so one bad record doesn't fail the batch. */
 function parseAttributes(id: number, raw: string): Record<string, unknown> {
-  try {
-    return JSON.parse(raw) as Record<string, unknown>;
-  } catch (err) {
-    logger.warn('Reporter metrics: corrupt attributes JSON on record {id}: {error}, sending empty object', {
-      id,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return {};
-  }
+	try {
+		return JSON.parse(raw) as Record<string, unknown>;
+	} catch (err) {
+		logger.warn(
+			"Reporter metrics: corrupt attributes JSON on record {id}: {error}, sending empty object",
+			{
+				id,
+				error: err instanceof Error ? err.message : String(err),
+			},
+		);
+		return {};
+	}
 }
 
 async function uploadMetricsBatch(
-  url: string,
-  payload: { records: unknown[] },
-  ids: number[],
-  authToken?: string,
+	url: string,
+	payload: { records: unknown[] },
+	ids: number[],
+	authToken?: string,
 ): Promise<void> {
-  let backoff = METRICS_INITIAL_BACKOFF;
+	let backoff = METRICS_INITIAL_BACKOFF;
 
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (authToken) {
-    headers['Authorization'] = `Bearer ${authToken}`;
-  }
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+	};
+	if (authToken) {
+		headers.Authorization = `Bearer ${authToken}`;
+	}
 
-  for (let attempt = 1; attempt <= METRICS_MAX_RETRIES; attempt++) {
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(METRICS_REQUEST_TIMEOUT_MS),
-      });
+	for (let attempt = 1; attempt <= METRICS_MAX_RETRIES; attempt++) {
+		try {
+			const res = await fetch(url, {
+				method: "POST",
+				headers,
+				body: JSON.stringify(payload),
+				signal: AbortSignal.timeout(METRICS_REQUEST_TIMEOUT_MS),
+			});
 
-      if (res.ok) {
-        let body: { ok: boolean; accepted: number[]; failed: number[] };
-        try {
-          body = (await res.json()) as { ok: boolean; accepted: number[]; failed: number[] };
-        } catch (err) {
-          // 200 but non-JSON body — server misbehaving. Treat as network error and retry.
-          throw new Error(`unexpected response body: ${err instanceof Error ? err.message : String(err)}`);
-        }
-        markOtelMetricsUploaded(body.accepted);
-        return;
-      }
+			if (res.ok) {
+				let body: { ok: boolean; accepted: number[]; failed: number[] };
+				try {
+					body = (await res.json()) as {
+						ok: boolean;
+						accepted: number[];
+						failed: number[];
+					};
+				} catch (err) {
+					// 200 but non-JSON body — server misbehaving. Treat as network error and retry.
+					throw new Error(
+						`unexpected response body: ${err instanceof Error ? err.message : String(err)}`,
+					);
+				}
+				markOtelMetricsUploaded(body.accepted);
+				return;
+			}
 
-      if (res.status === 429) {
-        // Rate-limited = client pacing issue, not an upstream outage.
-        logger.warn('Reporter metrics: rate-limited (429), retry {attempt}/{maxRetries}', {
-          attempt,
-          maxRetries: METRICS_MAX_RETRIES,
-        });
-      } else if (res.status >= 400 && res.status < 500) {
-        // Deterministic client error (e.g. 422 schema rejection). Retrying yields the same
-        // result every cycle → infinite loop. Mark the whole batch discarded so it leaves
-        // pending selection.
-        logger.warn(
-          'Reporter metrics: {status} from server, marking {count} records discarded (ids {first}-{last})',
-          { status: res.status, count: ids.length, first: ids[0], last: ids[ids.length - 1] },
-        );
-        markOtelMetricsDiscarded(ids);
-        return;
-      } else {
-        // 5xx = upstream outage. Non-deterministic, retry.
-        logger.warn('Reporter metrics: {status} from server, retry {attempt}/{maxRetries}', {
-          status: res.status,
-          attempt,
-          maxRetries: METRICS_MAX_RETRIES,
-        });
-      }
-    } catch (err) {
-      logger.warn('Reporter metrics: network error (attempt {attempt}/{maxRetries}): {message}', {
-        attempt,
-        maxRetries: METRICS_MAX_RETRIES,
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
+			if (res.status === 429) {
+				// Rate-limited = client pacing issue, not an upstream outage.
+				logger.warn(
+					"Reporter metrics: rate-limited (429), retry {attempt}/{maxRetries}",
+					{
+						attempt,
+						maxRetries: METRICS_MAX_RETRIES,
+					},
+				);
+			} else if (res.status >= 400 && res.status < 500) {
+				// Deterministic client error (e.g. 422 schema rejection). Retrying yields the same
+				// result every cycle → infinite loop. Mark the whole batch discarded so it leaves
+				// pending selection.
+				logger.warn(
+					"Reporter metrics: {status} from server, marking {count} records discarded (ids {first}-{last})",
+					{
+						status: res.status,
+						count: ids.length,
+						first: ids[0],
+						last: ids[ids.length - 1],
+					},
+				);
+				markOtelMetricsDiscarded(ids);
+				return;
+			} else {
+				// 5xx = upstream outage. Non-deterministic, retry.
+				logger.warn(
+					"Reporter metrics: {status} from server, retry {attempt}/{maxRetries}",
+					{
+						status: res.status,
+						attempt,
+						maxRetries: METRICS_MAX_RETRIES,
+					},
+				);
+			}
+		} catch (err) {
+			logger.warn(
+				"Reporter metrics: network error (attempt {attempt}/{maxRetries}): {message}",
+				{
+					attempt,
+					maxRetries: METRICS_MAX_RETRIES,
+					message: err instanceof Error ? err.message : String(err),
+				},
+			);
+		}
 
-    if (attempt < METRICS_MAX_RETRIES) {
-      await new Promise((r) => setTimeout(r, backoff));
-      backoff *= 2;
-    }
-  }
+		if (attempt < METRICS_MAX_RETRIES) {
+			await new Promise((r) => setTimeout(r, backoff));
+			backoff *= 2;
+		}
+	}
 
-  logger.warn('Reporter metrics: all retries exhausted, batch will be retried next cycle');
+	logger.warn(
+		"Reporter metrics: all retries exhausted, batch will be retried next cycle",
+	);
 }
