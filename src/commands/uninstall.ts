@@ -6,7 +6,8 @@
  *   2. Remove the service file (plist/systemd)
  *   3. Remove OTLP env vars from Claude Code's ~/.claude/settings.json
  *   4. Remove OTLP config from Codex's ~/.codex/config.toml
- *   5. Optionally remove data directory (--purge)
+ *   5. Remove OpenCode plugin from ~/.config/opencode/plugins/
+ *   6. Optionally remove data directory (--purge)
  */
 
 import { existsSync, rmSync } from 'fs';
@@ -88,9 +89,17 @@ export async function uninstallCommand(opts: UninstallOptions = {}): Promise<voi
     console.log(`  ${C.dim}→ No agent-telemetry [otel] sections found${C.reset}`);
   }
 
-  // ─── Step 5: Optionally purge data ───────────────────────────────────────
+  // ─── Step 5: Remove OpenCode plugin ───────────────────────────────────────
+  console.log(`${C.dim}⑤ Removing OpenCode plugin…${C.reset}`);
+  if (results.opencodeRemoved) {
+    console.log(`  ${C.green}✓${C.reset} Removed ~/.config/opencode/plugins/agent-telemetry.js`);
+  } else {
+    console.log(`  ${C.dim}→ No agent-telemetry plugin found${C.reset}`);
+  }
+
+  // ─── Step 6: Optionally purge data ───────────────────────────────────────
   if (opts.purge) {
-    console.log(`${C.dim}⑤ Purging data directory…${C.reset}`);
+    console.log(`${C.dim}⑥ Purging data directory…${C.reset}`);
     if (existsSync(paths.dataDir)) {
       rmSync(paths.dataDir, { recursive: true, force: true });
       console.log(`  ${C.green}✓${C.reset} Removed ${paths.dataDir}`);
@@ -98,7 +107,7 @@ export async function uninstallCommand(opts: UninstallOptions = {}): Promise<voi
       console.log(`  ${C.dim}→ Data directory not found${C.reset}`);
     }
   } else {
-    console.log(`${C.dim}⑤ Data directory preserved (${paths.dataDir})${C.reset}`);
+    console.log(`${C.dim}⑥ Data directory preserved (${paths.dataDir})${C.reset}`);
     console.log(`  ${C.dim}  Use --purge to remove all data${C.reset}`);
   }
 
@@ -107,7 +116,7 @@ export async function uninstallCommand(opts: UninstallOptions = {}): Promise<voi
   console.log(`${C.bold}${C.green}✓ Uninstall complete!${C.reset}`);
   console.log();
   console.log(`${C.bold}Note:${C.reset}`);
-  console.log(`  ${C.dim}•${C.reset} Restart Claude Code / Codex for env changes to take effect`);
+  console.log(`  ${C.dim}•${C.reset} Restart Claude Code / Codex / OpenCode for env changes to take effect`);
   if (!opts.purge) {
     console.log(`  ${C.dim}•${C.reset} Data directory kept. Run ${C.bold}agent-telemetry uninstall --purge${C.reset} to remove it.`);
   }

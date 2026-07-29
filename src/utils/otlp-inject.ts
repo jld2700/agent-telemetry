@@ -9,9 +9,10 @@
  * corrupt anything. Removal preserves all unrelated keys.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { logger } from './logger.js';
+import { generateOpenCodePluginJS, OPENCODE_PLUGIN_FILENAME } from './opencode-plugin.js';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -67,6 +68,14 @@ function getClaudeSettingsPath(): string {
 
 function getCodexConfigPath(): string {
   return join(process.env.HOME ?? '~', '.codex', 'config.toml');
+}
+
+function getOpenCodePluginsDir(): string {
+  return join(process.env.HOME ?? '~', '.config', 'opencode', 'plugins');
+}
+
+function getOpenCodePluginPath(): string {
+  return join(getOpenCodePluginsDir(), OPENCODE_PLUGIN_FILENAME);
 }
 
 function getDataDir(): string {
@@ -328,14 +337,89 @@ export function removeCodexOtlp(): boolean {
   return true;
 }
 
+// ─── OpenCode plugin injection ──────────────────────────────────────────────
+
+/**
+ * Inject the OpenCode plugin JS file at ~/.config/opencode/plugins/agent-telemetry.js.
+ *
+ * OpenCode does not have built-in OTLP support — we generate a self-contained
+ * JS plugin that hooks into tool.execute.before/after and event callbacks,
+ * constructs OTLP JSON log records, and POSTs them to agent-telemetry.
+ *
+ * - Creates the plugins directory if it doesn't exist
+ * - Overwrites the plugin file (idempotent — always writes latest version)
+ *
+ * @returns InjectionResult describing what changed
+ */
+export function injectOpenCodeOtlp(endpoint: string = DEFAULT_OTLP_ENDPOINT): InjectionResult {
+  const pluginPath = getOpenCodePluginPath();
+  const pluginsDir = getOpenCodePluginsDir();
+
+  if (!existsSync(pluginsDir)) {
+    mkdirSync(pluginsDir, { recursive: true });
+  }
+
+  const pluginJS = generateOpenCodePluginJS(endpoint);
+
+  // Check if already up to date
+  let changed = true;
+  if (existsSync(pluginPath)) {
+    try {
+      const existing = readFileSync(pluginPath, 'utf-8');
+      if (existing === pluginJS) {
+        changed = false;
+      }
+    } catch {
+      // File might be unreadable — overwrite
+    }
+  }
+
+  if (changed) {
+    writeFileSync(pluginPath, pluginJS);
+    logger.info('Generated OpenCode plugin', { path: pluginPath });
+  } else {
+    logger.debug('OpenCode plugin already up to date', { path: pluginPath });
+  }
+
+  return {
+    changed,
+    path: pluginPath,
+    keysAdded: changed ? [OPENCODE_PLUGIN_FILENAME] : [],
+    keysUpdated: [],
+  };
+}
+
+/**
+ * Remove the agent-telemetry plugin file from OpenCode's plugins directory.
+ *
+ * @returns true if the plugin was removed
+ */
+export function removeOpenCodeOtlp(): boolean {
+  const pluginPath = getOpenCodePluginPath();
+  if (!existsSync(pluginPath)) return false;
+
+  try {
+    unlinkSync(pluginPath);
+    logger.info('Removed OpenCode plugin', { path: pluginPath });
+    return true;
+  } catch (err) {
+    logger.warn('Failed to remove OpenCode plugin: {error}', {
+      path: pluginPath,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
+}
+
 // ─── Combined injection/removal ──────────────────────────────────────────────
 
 /**
- * Inject OTLP config into both Claude Code and Codex (if installed).
+ * Inject OTLP config into Claude Code, Codex, and OpenCode (if installed).
  */
 export function injectAllOtlp(endpoint: string = DEFAULT_OTLP_ENDPOINT): {
   claudeCode: InjectionResult;
   codex: InjectionResult | null;
+  opencode: InjectionResult | null;
 } {
   const claudeCode = injectClaudeCodeOtlp(endpoint);
 
@@ -348,19 +432,30 @@ export function injectAllOtlp(endpoint: string = DEFAULT_OTLP_ENDPOINT): {
     logger.info('Codex not detected (~/.codex not found), skipping Codex OTLP injection');
   }
 
-  return { claudeCode, codex };
+  // Only inject into OpenCode if ~/.config/opencode exists (don't create the config dir)
+  let opencode: InjectionResult | null = null;
+  const opencodeDir = join(process.env.HOME ?? '~', '.config', 'opencode');
+  if (existsSync(opencodeDir)) {
+    opencode = injectOpenCodeOtlp(endpoint);
+  } else {
+    logger.info('OpenCode not detected (~/.config/opencode not found), skipping OpenCode plugin injection');
+  }
+
+  return { claudeCode, codex, opencode };
 }
 
 /**
- * Remove OTLP config from both Claude Code and Codex.
+ * Remove OTLP config from Claude Code, Codex, and OpenCode.
  */
 export function removeAllOtlp(): {
   claudeCodeRemoved: number;
   codexRemoved: boolean;
+  opencodeRemoved: boolean;
 } {
   const claudeCodeRemoved = removeClaudeCodeOtlp();
   const codexRemoved = removeCodexOtlp();
-  return { claudeCodeRemoved, codexRemoved };
+  const opencodeRemoved = removeOpenCodeOtlp();
+  return { claudeCodeRemoved, codexRemoved, opencodeRemoved };
 }
 
 // ─── Config file copy helper ─────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 /**
  * Install command — installs agent-telemetry as a background service
- * and injects OTLP config into Claude Code and Codex.
+ * and injects OTLP config into Claude Code, Codex, and OpenCode.
  *
  * Steps:
  *   1. Create data directory (~/.agent-telemetry)
@@ -9,7 +9,8 @@
  *   4. Start the service
  *   5. Inject OTLP env vars into Claude Code's ~/.claude/settings.json
  *   6. Inject OTLP config into Codex's ~/.codex/config.toml (if installed)
- *   7. Print next steps
+ *   7. Inject OpenCode plugin into ~/.config/opencode/plugins/ (if installed)
+ *   8. Print next steps
  */
 
 import { existsSync, mkdirSync, copyFileSync, statSync } from 'fs';
@@ -129,8 +130,19 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
     } else {
       console.log(`${C.dim}⑥ Codex not detected, skipping${C.reset}`);
     }
+
+    if (results.opencode) {
+      console.log(`${C.dim}⑦ Injecting OpenCode plugin…${C.reset}`);
+      if (results.opencode.changed) {
+        console.log(`  ${C.green}✓${C.reset} Generated ${results.opencode.path}`);
+      } else {
+        console.log(`  ${C.dim}→ Already up to date: ${results.opencode.path}${C.reset}`);
+      }
+    } else {
+      console.log(`${C.dim}⑦ OpenCode not detected, skipping${C.reset}`);
+    }
   } else {
-    console.log(`${C.dim}⑤⑥ Skipping OTLP injection (--skip-otlp)${C.reset}`);
+    console.log(`${C.dim}⑤⑥⑦ Skipping OTLP injection (--skip-otlp)${C.reset}`);
   }
 
   // ─── Summary & next steps ────────────────────────────────────────────────

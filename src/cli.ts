@@ -37,7 +37,7 @@ ${BOLD}USAGE${RESET}
 ${BOLD}COMMANDS${RESET}
   (default)           Start the telemetry server (foreground)
   install             Install as background service + inject OTLP config
-  uninstall           Remove service + clean OTLP config from Claude Code/Codex
+  uninstall           Remove service + clean OTLP config from Claude Code/Codex/OpenCode
   status              Show service status, DB stats, OTLP injection status
   config              Open config.yml in $EDITOR
   logs                Tail log files (stdout + stderr)
@@ -46,7 +46,7 @@ ${BOLD}COMMANDS${RESET}
 
 ${BOLD}INSTALL OPTIONS${RESET}
   --endpoint <url>    Custom OTLP endpoint (default: http://127.0.0.1:9911/api/otel)
-  --skip-otlp         Skip OTLP injection into Claude Code/Codex
+  --skip-otlp         Skip OTLP injection into Claude Code/Codex/OpenCode
   --skip-service      Skip service file creation (only inject OTLP)
 
 ${BOLD}UNINSTALL OPTIONS${RESET}

@@ -409,7 +409,30 @@ Codex reads standard OpenTelemetry environment variables. Ensure `agent-telemetr
 
 ### OpenCode
 
-Set the OTLP endpoint in your environment or OpenCode config:
+OpenCode does **not** have built-in OTLP support like Claude Code or Codex. Instead, `agent-telemetry` generates a self-contained JS plugin that hooks into OpenCode's callbacks, constructs OTLP log records, and POSTs them to agent-telemetry.
+
+#### Auto-generated plugin (recommended)
+
+Run `agent-telemetry install` — the installer automatically generates a plugin file at:
+
+```
+~/.config/opencode/plugins/agent-telemetry.js
+```
+
+The plugin hooks into OpenCode's `tool.execute.before` / `tool.execute.after` and `event` callbacks and emits two OTLP event types:
+
+| Event | Description |
+|---|---|
+| `opencode.tool_call` | Tool execution with name, duration, input/result size, and MCP server detection |
+| `opencode.token_usage` | Token usage per assistant message (input, output, reasoning, cache read/write, cost) |
+
+The plugin is self-contained pure JS (no imports) and is idempotent — re-running `install` overwrites it with the latest version. It is only generated if `~/.config/opencode` already exists (OpenCode installed).
+
+To remove the plugin, run `agent-telemetry uninstall`.
+
+#### Manual configuration
+
+If you prefer to set the OTLP endpoint manually via environment variables:
 
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:9911

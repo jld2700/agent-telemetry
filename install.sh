@@ -16,7 +16,7 @@
 #   4. Creates data directory (~/.agent-telemetry)
 #   5. Copies config.yml template
 #   6. Installs as background service (launchd on macOS, systemd on Linux)
-#   7. Injects OTLP config into Claude Code and Codex
+#   7. Injects OTLP config into Claude Code, Codex, and OpenCode
 #   8. Prints next steps
 #
 set -euo pipefail
@@ -369,7 +369,7 @@ echo -e "${BOLD}Next steps:${RESET}"
 echo -e "  ${DIM}•${RESET} Check status:    ${BOLD}agent-telemetry status${RESET}"
 echo -e "  ${DIM}•${RESET} View logs:       ${BOLD}agent-telemetry logs${RESET}"
 echo -e "  ${DIM}•${RESET} Edit config:     ${BOLD}agent-telemetry config${RESET}"
-echo -e "  ${DIM}•${RESET} Restart Claude Code for OTLP env vars to take effect"
+echo -e "  ${DIM}•${RESET} Restart Claude Code / Codex / OpenCode for OTLP env vars to take effect"
 echo ""
 echo -e "${BOLD}How to verify it's working:${RESET}"
 echo -e "  ${DIM}•${RESET} Run any Claude Code session, then check:"
