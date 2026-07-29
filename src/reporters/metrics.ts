@@ -20,8 +20,6 @@ import {
 } from '../db/index.js';
 import { logger } from '../utils/logger.js';
 
-// Inlined constants (from DCC's src/daemon/constants.ts)
-const METRICS_BATCH_SIZE = 500;
 const METRICS_MAX_RETRIES = 3;
 const METRICS_INITIAL_BACKOFF = 1000;
 const METRICS_REQUEST_TIMEOUT_MS = 10_000;
@@ -33,8 +31,14 @@ let isRunning = false;
 
 export function startMetricsReporter(config: TelemetryConfig): void {
   if (timer) return;
-  timer = setInterval(() => runMetricsReport(config), config.intervals.metrics);
-  logger.info('Reporter metrics: started', { intervalMs: config.intervals.metrics });
+  if (!config.upstream?.url || !config.upstream.report_metrics) {
+    logger.info('Reporter metrics: disabled (no upstream URL or report_metrics=false)');
+    return;
+  }
+
+  const intervalMs = config.upstream.interval_ms;
+  timer = setInterval(() => runMetricsReport(config), intervalMs);
+  logger.info('Reporter metrics: started', { intervalMs });
 }
 
 export function stopMetricsReporter(): void {
@@ -59,12 +63,13 @@ export async function runMetricsReport(config: TelemetryConfig): Promise<void> {
 }
 
 async function runMetricsReportInner(config: TelemetryConfig): Promise<void> {
-  if (!config.upstream?.url) return;
+  if (!config.upstream?.url || !config.upstream.report_metrics) return;
 
   const baseUrl = config.upstream.url.replace(/\/+$/, '');
   const url = `${baseUrl}/v1/metrics`;
+  const batchSize = config.upstream.batch_size;
 
-  const pending = getPendingOtelMetrics(METRICS_BATCH_SIZE);
+  const pending = getPendingOtelMetrics(batchSize);
   if (pending.length === 0) return;
 
   const records = pending.map((r) => ({
@@ -83,7 +88,7 @@ async function runMetricsReportInner(config: TelemetryConfig): Promise<void> {
   }));
   const ids = pending.map((r) => r.id as number);
 
-  await uploadMetricsBatch(url, { records }, ids);
+  await uploadMetricsBatch(url, { records }, ids, config.upstream.token);
 }
 
 /** Parse the stored attributes JSON. Falls back to {} on corrupt rows so one bad record doesn't fail the batch. */
@@ -99,14 +104,24 @@ function parseAttributes(id: number, raw: string): Record<string, unknown> {
   }
 }
 
-async function uploadMetricsBatch(url: string, payload: { records: unknown[] }, ids: number[]): Promise<void> {
+async function uploadMetricsBatch(
+  url: string,
+  payload: { records: unknown[] },
+  ids: number[],
+  authToken?: string,
+): Promise<void> {
   let backoff = METRICS_INITIAL_BACKOFF;
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
 
   for (let attempt = 1; attempt <= METRICS_MAX_RETRIES; attempt++) {
     try {
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(METRICS_REQUEST_TIMEOUT_MS),
       });

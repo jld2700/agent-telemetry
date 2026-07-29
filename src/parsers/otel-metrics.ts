@@ -6,7 +6,7 @@
  * Claude Code and Codex send OTLP JSON metrics to the /v1/metrics endpoint.
  * This module:
  *   1. Parses the OTLP JSON payload (resourceMetrics → scopeMetrics → metrics → dataPoints)
- *   2. Ingests ALL metric types (sum/gauge/histogram) — no whitelist
+ *   2. Filters metrics via config-based per-agent filters (shouldCollect)
  *   3. Writes `value` type-dispatched: sum/gauge → numeric string; histogram → whole datapoint JSON
  *   4. Extracts session_id / user_id from datapoint attributes (falling back to resource)
  *   5. Stores only datapoint attributes in `attributes` (resource/scope excluded)
@@ -19,6 +19,8 @@
 import type { OtelMetricInsert } from '../db/index.js';
 import { insertOtelMetrics } from '../db/index.js';
 import { logger } from '../utils/logger.js';
+import type { TelemetryConfig } from '../config.js';
+import { shouldCollect, inferAgentKey } from '../utils/filter.js';
 import { normalizeCodexResourceAttrs, type OtlpAttribute } from './types.js';
 
 // ─── OTLP JSON type definitions ─────────────────────────────────────────────
@@ -79,20 +81,6 @@ function attrsToJson(attributes: OtlpAttribute[] | undefined): string {
 // the OTLP resource layer: we store the full resource attrs (service.name/version,
 // engine.*, user.id, host.*, os.*, …) via the same attrsToJson serializer.
 
-/**
- * Codex metric allowlist.
- *
- * Codex reports mostly diagnostic noise metrics (sse/websocket/shell_snapshot/prewarm/plugins/
- * memory/network_proxy/ttft/ttfm…), with no business value — dropped at ingest.
- *
- * Token usage consumption has migrated to log_events codex.sse_event (event.kind=response.completed),
- * which carries 100% session identifiers for session-level attribution. codex.turn.token_usage is
- * still ingested here as a lazy fallback/dual-source observation, but has no consumer.
- *
- * claude_code / unknown provider are not subject to this filter — full collection.
- */
-const CODEX_METRICS_ALLOWLIST = new Set(['codex.turn.token_usage']);
-
 function inferProvider(serviceName: string | undefined, metricName: string): string {
   if (serviceName) {
     if (serviceName.includes('claude')) return 'claude_code';
@@ -152,8 +140,11 @@ function buildRow(
 /**
  * Parse an OTLP metrics JSON payload into rows for the otel_metrics table.
  * Pure function — no side effects. Returns [] for malformed input (does not throw).
+ *
+ * @param bodyText  Raw OTLP JSON string
+ * @param config    Telemetry config (used for per-agent metric filtering)
  */
-export function parseOtlpMetrics(bodyText: string): OtelMetricInsert[] {
+export function parseOtlpMetrics(bodyText: string, config?: TelemetryConfig): OtelMetricInsert[] {
   let payload: OtlpMetricsPayload;
   try {
     payload = JSON.parse(bodyText) as OtlpMetricsPayload;
@@ -163,6 +154,7 @@ export function parseOtlpMetrics(bodyText: string): OtelMetricInsert[] {
   if (!payload || !Array.isArray(payload.resourceMetrics)) return [];
 
   const results: OtelMetricInsert[] = [];
+  const agentsConfig = config?.agents ?? {};
 
   for (const resourceMetric of payload.resourceMetrics) {
     const resourceAttrs = resourceMetric.resource?.attributes ?? [];
@@ -173,11 +165,9 @@ export function parseOtlpMetrics(bodyText: string): OtelMetricInsert[] {
 
     for (const scopeMetric of resourceMetric.scopeMetrics ?? []) {
       for (const metric of scopeMetric.metrics ?? []) {
-        // Codex allowlist: drop everything except codex.turn.token_usage at ingest time so noise
-        // never reaches the DB or the remote reporter. Only codex is filtered; claude_code /
-        // unknown stay unfiltered.
-        const provider = inferProvider(serviceName, metric.name);
-        if (provider === 'codex' && !CODEX_METRICS_ALLOWLIST.has(metric.name)) continue;
+        // Config-based filtering: check if this metric should be collected
+        const agentKey = inferAgentKey(metric.name);
+        if (!shouldCollect(metric.name, agentKey, 'metrics', agentsConfig)) continue;
 
         if (metric.sum?.dataPoints) {
           for (const dp of metric.sum.dataPoints) {
@@ -205,9 +195,9 @@ export function parseOtlpMetrics(bodyText: string): OtelMetricInsert[] {
  * Parse and persist OTLP metrics to SQLite.
  * Failures are logged but do not propagate.
  */
-export function persistOtlpMetrics(bodyText: string): void {
+export function persistOtlpMetrics(bodyText: string, config?: TelemetryConfig): void {
   try {
-    const rows = parseOtlpMetrics(bodyText);
+    const rows = parseOtlpMetrics(bodyText, config);
     if (rows.length > 0) {
       insertOtelMetrics(rows);
       logger.info('Persisted {count} metric datapoints', { count: rows.length });

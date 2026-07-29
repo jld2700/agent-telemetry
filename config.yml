@@ -1,0 +1,123 @@
+# agent-telemetry configuration
+# Copy to ~/.agent-telemetry/config.yml or set AGENT_TELEMETRY_CONFIG=path
+
+# ─── Collection control ─────────────────────────────────
+collect_logs: true
+collect_metrics: true
+collect_traces: true
+
+# ─── Per-agent filters (allow/deny/all) ─────────────────
+# mode: allow = whitelist (only collect listed), deny = blacklist (collect all except listed), all = collect everything
+agents:
+  claude_code:
+    log_events:
+      mode: allow
+      list:
+        - claude_code.tool_result
+        - claude_code.tool_decision
+        - claude_code.user_prompt
+        - claude_code.skill_activated
+        - claude_code.mcp_server_connection
+        - claude_code.api_request
+        - claude_code.api_error
+        - claude_code.compaction
+        - claude_code.permission_mode_changed
+        - claude_code.hook_execution_complete
+    metrics:
+      mode: all
+      list: []
+    traces:
+      mode: all
+      list: []
+
+  codex:
+    log_events:
+      mode: allow
+      list:
+        - codex.conversation_starts
+        - codex.user_prompt
+        - codex.tool_result
+        - codex.sse_event
+        - codex.api_request
+    metrics:
+      mode: all
+      list: []
+    traces:
+      mode: all
+      list: []
+
+  opencode:
+    log_events:
+      mode: all
+      list: []
+    metrics:
+      mode: all
+      list: []
+    traces:
+      mode: all
+      list: []
+
+# ─── Upstream reporting (batch POST to custom backend) ──
+upstream:
+  url: ""                    # empty = disabled
+  token: ""
+  batch_size: 500
+  interval_ms: 600000        # 10 minutes
+  report_logs: true
+  report_metrics: true
+
+# ─── OTLP forwarding (standard OTLP/HTTP, multi-target) ─
+# Works with any OpenTelemetry-compatible platform
+otlp_forwarders: []
+  # - name: langfuse
+  #   url: https://langfuse.example.com/api/otel
+  #   auth:
+  #     type: basic
+  #     username: pk-xxx
+  #     password: sk-xxx
+  #   signals: [traces, logs]
+  #   enabled: true
+  #
+  # - name: honeycomb
+  #   url: https://api.honeycomb.io
+  #   auth:
+  #     type: bearer
+  #     token: xxx
+  #   signals: [traces, logs, metrics]
+  #   enabled: true
+  #
+  # - name: datadog
+  #   url: https://trace.agent.datadoghq.eu
+  #   auth:
+  #     type: header
+  #     headers:
+  #       X-Datadog-API-Key: xxx
+  #   signals: [traces]
+  #   enabled: false
+  #
+  # - name: jaeger
+  #   url: http://jaeger:4318
+  #   auth:
+  #     type: none
+  #   signals: [traces]
+  #   enabled: false
+  #
+  # - name: grafana-cloud
+  #   url: https://otlp-prod-xx.grafana.net/otlp
+  #   auth:
+  #     type: basic
+  #     username: xxx
+  #     password: xxx
+  #   signals: [traces, logs, metrics]
+  #   enabled: false
+
+# ─── HTTP server ────────────────────────────────────────
+server:
+  host: 127.0.0.1
+  port: 9911
+
+# ─── Data directory ─────────────────────────────────────
+data_dir: ~/.agent-telemetry
+
+# ─── Logging ────────────────────────────────────────────
+log_level: info

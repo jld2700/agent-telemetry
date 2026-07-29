@@ -6,7 +6,7 @@
  * Claude Code sends OTLP JSON logs to the /v1/logs endpoint.
  * This module:
  *   1. Parses the OTLP JSON payload (resourceLogs → scopeLogs → logRecords)
- *   2. Filters to allowed event types (ALLOWED_EVENTS)
+ *   2. Filters events via config-based per-agent filters (shouldCollect)
  *   3. Extracts key fields (tool_name, session_id, success, duration_ms) into typed columns
  *   4. Serializes remaining attributes as flat JSON into the `attributes` column
  *   5. Inserts into SQLite `log_events` table via `insertLogEvents`
@@ -18,31 +18,11 @@
 import type { LogEventInsert } from '../db/index.js';
 import { insertLogEvents } from '../db/index.js';
 import { logger } from '../utils/logger.js';
+import type { TelemetryConfig } from '../config.js';
+import { shouldCollect, inferAgentKey } from '../utils/filter.js';
 import { normalizeCodexResourceAttrs, type OtlpAttribute } from './types.js';
 import { parseCodexOtlpLogRecord } from './otel-codex-logs.js';
 import { parseOpencodeOtlpLogRecord } from './otel-opencode-logs.js';
-
-/**
- * Claude Code event types we persist to log_events table. Others are dropped.
- *
- * NOTE: Several attributes are gated by OTEL_LOG_TOOL_DETAILS=1:
- *   - tool_result: tool_parameters (bash_command), tool_input, file_path
- *   - skill_activated: real skill.name (otherwise "custom_skill")
- *   - mcp_server_connection: server_name
- */
-const ALLOWED_EVENTS = new Set([
-  // Claude Code events
-  'claude_code.tool_result', // tool call completed (success/failure, duration)
-  'claude_code.tool_decision', // permission decision (accept/reject + source)
-  'claude_code.user_prompt', // user submitted a prompt (prompt_length, command_name)
-  'claude_code.skill_activated', // skill plugin activated (skill.name, trigger)
-  'claude_code.mcp_server_connection', // MCP server connect/disconnect (status, duration)
-  'claude_code.api_request', // LLM API call (model, tokens, cost) — covers pure-chat sessions
-  'claude_code.api_error', // LLM API call failed (error, status_code)
-  'claude_code.compaction', // conversation compaction completed (trigger, pre/post_tokens)
-  'claude_code.permission_mode_changed', // permission mode switch (from_mode, to_mode, trigger)
-  'claude_code.hook_execution_complete', // all hooks for an event finished (hook_event, num_*, total_duration_ms)
-]);
 
 // ─── OTLP JSON type definitions ─────────────────────────────────────────────
 
@@ -104,7 +84,8 @@ function attrsToJson(attributes: OtlpAttribute[] | undefined): string {
 
 /**
  * Map event_name + tool_name → category.
- * Returns null for unknown events (caller should skip these).
+ * Returns null for unknown event formats (caller should skip these — parsing issue, not filtering).
+ * The config-based filter (shouldCollect) is applied separately before this function is reached.
  */
 function getCategory(eventName: string, toolName: string | null): string | null {
   if (eventName === 'claude_code.skill_activated') return 'skill';
@@ -127,10 +108,14 @@ function getCategory(eventName: string, toolName: string | null): string | null 
 /**
  * Parse an OTLP logs JSON payload into rows for the log_events table.
  * Pure function — no side effects, safe to test independently.
+ *
+ * @param bodyText  Raw OTLP JSON string
+ * @param config    Telemetry config (used for per-agent event filtering)
  */
-export function parseOtlpLogs(bodyText: string): LogEventInsert[] {
+export function parseOtlpLogs(bodyText: string, config?: TelemetryConfig): LogEventInsert[] {
   const payload = JSON.parse(bodyText) as OtlpLogPayload;
   const results: LogEventInsert[] = [];
+  const agentsConfig = config?.agents ?? {};
 
   for (const resourceLog of payload.resourceLogs ?? []) {
     // user.id is at the OTLP resource level (shared across all log records in this resource)
@@ -141,25 +126,32 @@ export function parseOtlpLogs(bodyText: string): LogEventInsert[] {
 
     for (const scopeLog of resourceLog.scopeLogs ?? []) {
       for (const record of scopeLog.logRecords ?? []) {
-        const codexRow = parseCodexOtlpLogRecord(record, userId, resourceJson);
+        // Try Codex parser first (discriminated by event.name attribute)
+        const codexRow = parseCodexOtlpLogRecord(record, userId, resourceJson, config);
         if (codexRow) {
           results.push(codexRow);
           continue;
         }
 
-        const opencodeRow = parseOpencodeOtlpLogRecord(record, userId, resourceJson);
+        // Try OpenCode parser
+        const opencodeRow = parseOpencodeOtlpLogRecord(record, userId, resourceJson, config);
         if (opencodeRow) {
           results.push(opencodeRow);
           continue;
         }
 
+        // Claude Code events: event_name is in body.stringValue
         const eventName = record.body?.stringValue;
-        if (!eventName || !ALLOWED_EVENTS.has(eventName)) continue;
+        if (!eventName) continue;
+
+        // Config-based filtering: check if this event should be collected
+        if (!shouldCollect(eventName, inferAgentKey(eventName), 'log_events', agentsConfig)) continue;
 
         const attrs = record.attributes ?? [];
         // tool_name for tool events, skill.name for skill events
         const toolName = getStringAttr(attrs, 'tool_name') ?? getStringAttr(attrs, 'skill.name') ?? null;
         const category = getCategory(eventName, toolName);
+        // getCategory returns null for truly unknown event formats (parsing issue, not filtering)
         if (!category) continue;
 
         if (eventName === 'claude_code.api_error') {
@@ -204,9 +196,9 @@ export function parseOtlpLogs(bodyText: string): LogEventInsert[] {
  * Parse and persist OTLP logs to SQLite.
  * Failures are logged but do not propagate (the upstream already received the data).
  */
-export function persistOtlpLogs(bodyText: string): void {
+export function persistOtlpLogs(bodyText: string, config?: TelemetryConfig): void {
   try {
-    const rows = parseOtlpLogs(bodyText);
+    const rows = parseOtlpLogs(bodyText, config);
     if (rows.length > 0) {
       insertLogEvents(rows);
       logger.info('Persisted {count} log events', { count: rows.length });

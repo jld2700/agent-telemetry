@@ -1,6 +1,6 @@
 # agent-telemetry
 
-A standalone [OpenTelemetry](https://opentelemetry.io/) collector for AI coding agents. It receives OTLP telemetry emitted by agents such as **Claude Code**, **Codex**, and **OpenCode**, stores it locally in SQLite, and optionally forwards it to upstream backends or [Langfuse](https://langfuse.com/).
+A standalone [OpenTelemetry](https://opentelemetry.io/) collector for AI coding agents. It receives OTLP telemetry emitted by agents such as **Claude Code**, **Codex**, and **OpenCode**, stores it locally in SQLite, and optionally forwards it to upstream backends or any OTLP-compatible platform.
 
 ---
 
@@ -10,8 +10,9 @@ AI coding agents emit rich OTLP telemetry — tool calls, token usage, session e
 
 - 📥 **Receives** OTLP logs, metrics, and traces over HTTP
 - 💾 **Stores** everything in a local SQLite database (WAL mode, zero-config)
-- ⬆️ **Forwards** to an upstream backend (e.g. DCC service, custom API)
-- 🔗 **Forwards** to Langfuse for LLM observability and tracing
+- 🔒 **Per-agent filtering** — whitelist, blacklist, or collect-all per signal type, configured in YAML
+- ⬆️ **Batch upstream reporting** to a custom HTTP backend with auth token
+- 🔗 **Multi-target OTLP forwarding** — forward raw OTLP to any OpenTelemetry-compatible platform (Langfuse, Honeycomb, Datadog, Jaeger, Grafana Cloud, Tempo, and more)
 - 🔌 **Zero dependencies** at runtime — built on [Bun](https://bun.sh/)
 
 ---
@@ -20,12 +21,13 @@ AI coding agents emit rich OTLP telemetry — tool calls, token usage, session e
 
 | Feature | Description |
 |---|---|
-| **OTLP HTTP Receiver** | Accepts `/api/otel/v1/logs`, `/v1/metrics`, `/v1/traces` in OTLP/Protobuf and OTLP/JSON |
+| **OTLP HTTP Receiver** | Accepts `/v1/logs`, `/v1/metrics`, `/v1/traces` in OTLP/JSON |
 | **SQLite Storage** | Embedded `bun:sqlite` database with WAL mode for crash-safe, high-throughput writes |
+| **YAML Configuration** | Full config via `config.yml` — collection toggles, per-agent filters, upstream, forwarders |
+| **Per-Agent Filters** | Whitelist (allow), blacklist (deny), or collect-all (all) for log events, metrics, and traces per agent |
+| **Multi-Target OTLP Forwarding** | Forward raw OTLP/HTTP to multiple platforms simultaneously with flexible auth (basic, bearer, header, none) |
 | **Upstream Reporting** | Periodic batch forwarding to a configurable HTTP backend with auth token |
-| **Langfuse Forwarding** | Converts OTLP traces/logs into Langfuse-compatible events for LLM tracing |
 | **Multi-Agent Support** | Tags every record with a `provider` field (claude-code, codex, opencode) |
-| **Configurable Intervals** | Independent batch intervals for log events and metrics |
 | **Programmatic API** | Can be used as a library, not just a CLI |
 
 ---
@@ -84,39 +86,139 @@ Pre-built binaries are available on the [Releases](https://github.com/nousresear
 
 ## Configuration
 
-All configuration is via environment variables with the `AGENT_TELEMETRY_` prefix. An optional `agent-telemetry.toml` or `.json` config file in the data directory is also supported.
+Configuration is via a YAML file (`config.yml`). The config file is loaded from:
 
-### Environment Variables
+1. **`AGENT_TELEMETRY_CONFIG` env var** — explicit path to a config file
+2. **`config.yml` in the data directory** — defaults to `~/.agent-telemetry/config.yml`
+3. **Defaults** — if no config file exists, everything is collected, no forwarding/upstream
+
+A fully documented template is included at [`config.yml`](config.yml) in the project root. Copy it to `~/.agent-telemetry/config.yml` and edit as needed.
+
+### Environment Variable Overrides
+
+The following env vars override the corresponding config file values:
 
 | Variable | Default | Description |
 |---|---|---|
-| `AGENT_TELEMETRY_DATA_DIR` | `~/.agent-telemetry` | Directory for SQLite DB and logs |
+| `AGENT_TELEMETRY_CONFIG` | _(none)_ | Path to a custom config.yml file |
+| `AGENT_TELEMETRY_DATA_DIR` | `~/.agent-telemetry` | Directory for SQLite DB and config |
 | `AGENT_TELEMETRY_HOST` | `127.0.0.1` | HTTP server bind address |
 | `AGENT_TELEMETRY_PORT` | `9911` | HTTP server port |
-| `AGENT_TELEMETRY_UPSTREAM_URL` | _(disabled)_ | Upstream backend URL for batch forwarding |
-| `AGENT_TELEMETRY_UPSTREAM_TOKEN` | _(none)_ | Bearer token for upstream API auth |
-| `AGENT_TELEMETRY_LANGFUSE_BASE_URL` | _(disabled)_ | Langfuse instance URL |
-| `AGENT_TELEMETRY_LANGFUSE_PUBLIC_KEY` | _(none)_ | Langfuse public key |
-| `AGENT_TELEMETRY_LANGFUSE_SECRET_KEY` | _(none)_ | Langfuse secret key |
-| `AGENT_TELEMETRY_LOG_INTERVAL` | `600000` | Log event reporting interval (ms) |
-| `AGENT_TELEMETRY_METRICS_INTERVAL` | `600000` | Metrics reporting interval (ms) |
 | `AGENT_TELEMETRY_LOG_LEVEL` | `info` | Log level: `debug` \| `info` \| `warn` \| `error` |
+| `AGENT_TELEMETRY_UPSTREAM_URL` | _(disabled)_ | Upstream backend URL for batch reporting |
+| `AGENT_TELEMETRY_UPSTREAM_TOKEN` | _(none)_ | Bearer token for upstream API auth |
 
-### Example `.env`
+### Per-Agent Filtering
 
-```bash
-AGENT_TELEMETRY_PORT=9911
-AGENT_TELEMETRY_LOG_LEVEL=debug
+Each agent can have independent filters for `log_events`, `metrics`, and `traces`:
 
-# Forward to a custom backend
-AGENT_TELEMETRY_UPSTREAM_URL=https://my-backend.example.com/api/telemetry
-AGENT_TELEMETRY_UPSTREAM_TOKEN=sk-xxxxxxxxxxxx
+```yaml
+agents:
+  claude_code:
+    log_events:
+      mode: allow          # whitelist — only collect listed events
+      list:
+        - claude_code.tool_result
+        - claude_code.api_request
+    metrics:
+      mode: all            # collect all metrics
+      list: []
+    traces:
+      mode: deny           # blacklist — collect all except listed
+      list:
+        - claude_code.noisy_trace
 
-# Forward to Langfuse
-AGENT_TELEMETRY_LANGFUSE_BASE_URL=https://cloud.langfuse.com
-AGENT_TELEMETRY_LANGFUSE_PUBLIC_KEY=pk-lf-xxxx
-AGENT_TELEMETRY_LANGFUSE_SECRET_KEY=sk-lf-xxxx
+  codex:
+    log_events:
+      mode: allow
+      list:
+        - codex.conversation_starts
+        - codex.user_prompt
+        - codex.tool_result
 ```
+
+**Filter modes:**
+
+| Mode | Behavior |
+|---|---|
+| `allow` | **Whitelist** — only collect events/metrics/traces whose names are in `list` |
+| `deny` | **Blacklist** — collect everything except names in `list` |
+| `all` | **Collect everything** — `list` is ignored |
+
+If an agent has no config entry, or a signal type has no filter, all data for that signal is collected.
+
+### OTLP Multi-Target Forwarding
+
+Forward raw OTLP/HTTP payloads to one or more OpenTelemetry-compatible platforms. Each forwarder specifies a URL, auth method, which signal types to forward, and whether it's enabled:
+
+```yaml
+otlp_forwarders:
+  - name: langfuse
+    url: https://langfuse.example.com/api/otel
+    auth:
+      type: basic
+      username: pk-xxx
+      password: sk-xxx
+    signals: [traces, logs]
+    enabled: true
+
+  - name: honeycomb
+    url: https://api.honeycomb.io
+    auth:
+      type: bearer
+      token: xxx
+    signals: [traces, logs, metrics]
+    enabled: true
+
+  - name: datadog
+    url: https://trace.agent.datadoghq.eu
+    auth:
+      type: header
+      headers:
+        X-Datadog-API-Key: xxx
+    signals: [traces]
+    enabled: false
+```
+
+**Auth types:**
+
+| Type | Description | Fields |
+|---|---|---|
+| `basic` | HTTP Basic Auth | `username`, `password` |
+| `bearer` | Bearer token | `token` |
+| `header` | Custom headers | `headers` (map of key-value pairs) |
+| `none` | No authentication | _(none)_ |
+
+**Supported OTLP platforms:**
+
+| Platform | Auth Type | Notes |
+|---|---|---|
+| [Langfuse](https://langfuse.com/) | `basic` | URL: `https://cloud.langfuse.com/api/public/otel` |
+| [Honeycomb](https://www.honeycomb.io/) | `bearer` | Use API key as bearer token |
+| [Datadog](https://www.datadoghq.com/) | `header` | `X-Datadog-API-Key` header |
+| [Jaeger](https://www.jaegertracing.io/) | `none` | Local: `http://jaeger:4318` |
+| [Tempo](https://grafana.com/oss/tempo/) | `none` / `basic` | Local or Grafana Cloud |
+| [Grafana Cloud](https://grafana.com/) | `basic` | OTLP endpoint in Grafana dashboard |
+| [New Relic](https://newrelic.com/) | `header` | `Api-Key` header |
+| [Splunk Observability](https://splunk.com/) | `bearer` | Access token as bearer |
+
+Forwarding is **fire-and-forget** — the agent receives a 200 response immediately; forwarder errors are logged but don't block.
+
+### Upstream Batch Reporting
+
+Periodic batch upload of locally-stored log events and metrics to a custom HTTP backend:
+
+```yaml
+upstream:
+  url: "https://my-backend.example.com/api/telemetry"
+  token: "my-secret-token"
+  batch_size: 500
+  interval_ms: 600000      # 10 minutes
+  report_logs: true
+  report_metrics: true
+```
+
+The upstream backend should accept `POST /v1/logs` and `POST /v1/metrics` with JSON payloads and respond with `{ ok: true, accepted: [...], failed: [...] }`.
 
 ---
 
@@ -129,31 +231,26 @@ AGENT_TELEMETRY_LANGFUSE_SECRET_KEY=sk-lf-xxxx
         │                │               │
         │   OTLP/HTTP    │   OTLP/HTTP   │
         ▼                ▼               ▼
-  ┌─────────────────────────────────────────────┐
-  │            agent-telemetry                  │
-  │  ┌─────────┐  ┌─────────┐  ┌────────────┐  │
-  │  │ Receiver│→ │  Parser │→ │   Store    │  │
-  │  │ (HTTP)  │  │ (OTLP)  │  │  (SQLite)  │  │
-  │  └─────────┘  └─────────┘  └─────┬──────┘  │
-  │                                   │         │
-  │           ┌───────────────────────┼─────┐   │
-  │           ▼                       ▼     │   │
-  │     ┌──────────┐          ┌──────────┐  │   │
-  │     │ Upstream │          │ Langfuse │  │   │
-  │     │ Reporter │          │ Reporter │  │   │
-  │     └──────────┘          └──────────┘  │   │
-  └─────────────────────────────────────────┘   │
-                                                │
-                        ┌───────────────────────┘
-                        ▼
-              ┌──────────────────┐
-              │  SQLite Database │
-              │  ~/.agent-       │
-              │  telemetry/      │
-              └──────────────────┘
+  ┌─────────────────────────────────────────────────┐
+  │              agent-telemetry                     │
+  │  ┌─────────┐  ┌─────────┐  ┌────────────────┐  │
+  │  │ Receiver│→ │  Parser │→ │ Config Filter  │  │
+  │  │ (HTTP)  │  │ (OTLP)  │  │ (shouldCollect)│  │
+  │  └─────────┘  └─────────┘  └───────┬────────┘  │
+  │                                    │            │
+  │           ┌────────────────────────┼────────┐   │
+  │           ▼                        ▼        │   │
+  │     ┌──────────┐          ┌───────────────┐ │   │
+  │     │  SQLite  │          │  OTLP Forward │ │   │
+  │     │  Store   │          │  (multi-target)│ │   │
+  │     └────┬─────┘          └───────┬───────┘ │   │
+  │          │                       │         │   │
+  │     ┌────▼─────┐                 │         │   │
+  │     │ Upstream │                 │         │   │
+  │     │ Reporter │          ┌──────┼──────┐  │   │
+  │     └──────────┘          ▼      ▼      ▼  │   │
+  └────────────────────  Langfuse Honeycomb …  ────┘
 ```
-
-See [docs/architecture.md](docs/architecture.md) for a detailed component breakdown.
 
 ---
 
@@ -163,16 +260,16 @@ See [docs/architecture.md](docs/architecture.md) for a detailed component breakd
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/api/otel/v1/logs` | `POST` | OTLP logs — receives log records from agents |
+| `/v1/logs` | `POST` | OTLP logs — receives log records from agents |
 | `/v1/metrics` | `POST` | OTLP metrics — receives metric data points |
-| `/v1/traces` | `POST` | OTLP traces — receives span data (forwarded to Langfuse if enabled) |
+| `/v1/traces` | `POST` | OTLP traces — receives span data (forwarded if configured) |
 
 All endpoints accept OTLP/JSON payloads (`Content-Type: application/json`). Requests return `200 OK` on success.
 
 ### Example request
 
 ```bash
-curl -X POST http://127.0.0.1:9911/api/otel/v1/logs \
+curl -X POST http://127.0.0.1:9911/v1/logs \
   -H "Content-Type: application/json" \
   -d '{
     "resourceLogs": [{
@@ -204,7 +301,7 @@ OTLP log records from agents — tool calls, session events, user actions.
 | Column | Type | Description |
 |---|---|---|
 | `id` | INTEGER PK | Auto-increment ID |
-| `provider` | TEXT | Agent source: `claude-code`, `codex`, `opencode` |
+| `provider` | TEXT | Agent source: `claude`, `codex`, `opencode` |
 | `category` | TEXT | Event category (e.g. `tool`, `session`, `model`) |
 | `event_name` | TEXT | Specific event name |
 | `tool_name` | TEXT \| NULL | Tool name if applicable |
@@ -227,7 +324,7 @@ OTLP metric data points — token counts, durations, counters.
 | `id` | INTEGER PK | Auto-increment ID |
 | `provider` | TEXT | Agent source |
 | `metric_name` | TEXT | Metric name (e.g. `token_count`) |
-| `metric_type` | TEXT | Metric type: `counter`, `gauge`, `histogram` |
+| `metric_type` | TEXT | Metric type: `sum`, `gauge`, `histogram` |
 | `value` | TEXT | Metric value (string-encoded) |
 | `attributes` | TEXT (JSON) | Metric attributes |
 | `session_id` | TEXT \| NULL | Agent session ID |
@@ -337,21 +434,26 @@ bun run build
 ```
 agent-telemetry/
 ├── src/
-│   ├── cli.ts              # CLI entry point
-│   ├── index.ts            # Programmatic API
-│   ├── config.ts           # Configuration loader
+│   ├── cli.ts                      # CLI entry point
+│   ├── index.ts                    # Programmatic API
+│   ├── config.ts                   # YAML config loader
 │   ├── db/
-│   │   └── index.ts        # SQLite database (bun:sqlite)
+│   │   └── index.ts                # SQLite database (bun:sqlite)
 │   ├── parsers/
-│   │   ├── otlp.ts         # OTLP Protobuf/JSON parser
-│   │   └── routes.ts       # HTTP route handlers
+│   │   ├── otel-logs.ts            # Claude Code OTLP logs parser
+│   │   ├── otel-codex-logs.ts      # Codex OTLP logs parser
+│   │   ├── otel-opencode-logs.ts   # OpenCode OTLP logs parser
+│   │   ├── otel-metrics.ts         # OTLP metrics parser
+│   │   └── types.ts                # Shared OTLP type definitions
+│   ├── routes/
+│   │   └── otel.ts                 # OTLP HTTP handler + multi-target forwarding
 │   ├── reporters/
-│   │   ├── upstream.ts     # Upstream backend reporter
-│   │   └── langfuse.ts     # Langfuse forwarding reporter
+│   │   ├── log-events.ts           # Upstream log events batch reporter
+│   │   └── metrics.ts              # Upstream metrics batch reporter
 │   └── utils/
-│       └── logger.ts       # Structured logger
-├── docs/
-│   └── architecture.md     # Architecture documentation
+│       ├── logger.ts               # Structured logger
+│       └── filter.ts               # Per-agent filter utility (shouldCollect)
+├── config.yml                      # Config template (copy to ~/.agent-telemetry/)
 ├── package.json
 ├── tsconfig.json
 └── README.md

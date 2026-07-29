@@ -18,8 +18,6 @@ import {
 } from '../db/index.js';
 import { logger } from '../utils/logger.js';
 
-// Inlined constants (from DCC's src/daemon/constants.ts)
-const LOG_EVENTS_BATCH_SIZE = 500;
 const LOG_EVENTS_MAX_RETRIES = 3;
 const LOG_EVENTS_INITIAL_BACKOFF = 1000;
 const LOG_EVENTS_REQUEST_TIMEOUT_MS = 10_000;
@@ -31,8 +29,14 @@ let isRunning = false;
 
 export function startLogEventsReporter(config: TelemetryConfig): void {
   if (timer) return;
-  timer = setInterval(() => runLogEventsReport(config), config.intervals.logEvents);
-  logger.info('Reporter log-events: started', { intervalMs: config.intervals.logEvents });
+  if (!config.upstream?.url || !config.upstream.report_logs) {
+    logger.info('Reporter log-events: disabled (no upstream URL or report_logs=false)');
+    return;
+  }
+
+  const intervalMs = config.upstream.interval_ms;
+  timer = setInterval(() => runLogEventsReport(config), intervalMs);
+  logger.info('Reporter log-events: started', { intervalMs });
 }
 
 export function stopLogEventsReporter(): void {
@@ -57,12 +61,13 @@ export async function runLogEventsReport(config: TelemetryConfig): Promise<void>
 }
 
 async function runLogEventsReportInner(config: TelemetryConfig): Promise<void> {
-  if (!config.upstream?.url) return;
+  if (!config.upstream?.url || !config.upstream.report_logs) return;
 
   const baseUrl = config.upstream.url.replace(/\/+$/, '');
   const url = `${baseUrl}/v1/logs`;
+  const batchSize = config.upstream.batch_size;
 
-  const pending = getPendingLogEvents(LOG_EVENTS_BATCH_SIZE);
+  const pending = getPendingLogEvents(batchSize);
   // IMPORTANT: Unlike DCC, agent-telemetry uploads ALL log events (no session_id filter).
   // DCC filtered to session_id !== null because its dashboard required session attribution;
   // agent-telemetry is a standalone collector that should upload everything.
@@ -85,7 +90,7 @@ async function runLogEventsReportInner(config: TelemetryConfig): Promise<void> {
   }));
   const ids = pending.map((r) => r.id as number);
 
-  await uploadLogEventsBatch(url, { records }, ids);
+  await uploadLogEventsBatch(url, { records }, ids, config.upstream.token);
 }
 
 /** Parse the stored attributes JSON. Falls back to {} on corrupt rows so one bad record doesn't fail the batch. */
@@ -101,14 +106,24 @@ function parseAttributes(id: number, raw: string): Record<string, unknown> {
   }
 }
 
-async function uploadLogEventsBatch(url: string, payload: { records: unknown[] }, ids: number[]): Promise<void> {
+async function uploadLogEventsBatch(
+  url: string,
+  payload: { records: unknown[] },
+  ids: number[],
+  authToken?: string,
+): Promise<void> {
   let backoff = LOG_EVENTS_INITIAL_BACKOFF;
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
 
   for (let attempt = 1; attempt <= LOG_EVENTS_MAX_RETRIES; attempt++) {
     try {
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(LOG_EVENTS_REQUEST_TIMEOUT_MS),
       });

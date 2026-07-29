@@ -4,6 +4,8 @@
  * Ported from DCC's src/daemon/routes/otel-codex-logs.ts.
  * Discriminated by the `event.name` attribute.
  */
+import type { TelemetryConfig } from '../config.js';
+import { shouldCollect, inferAgentKey } from '../utils/filter.js';
 import type { OtlpAttribute } from './types.js';
 
 type CodexOtlpLogRecord = {
@@ -77,10 +79,15 @@ export function parseCodexOtlpLogRecord(
   record: CodexOtlpLogRecord,
   userId: string | null,
   resourceJson: string,
+  config?: TelemetryConfig,
 ): CodexLogEventInsert | null {
   const attrs = record.attributes ?? [];
   const eventName = getStringAttr(attrs, 'event.name');
   if (!eventName) return null;
+
+  // Config-based filtering: check if this event should be collected
+  const agentsConfig = config?.agents ?? {};
+  if (!shouldCollect(eventName, inferAgentKey(eventName), 'log_events', agentsConfig)) return null;
 
   const toolName = getStringAttr(attrs, 'tool_name') ?? null;
   const eventKind = getStringAttr(attrs, 'event.kind');

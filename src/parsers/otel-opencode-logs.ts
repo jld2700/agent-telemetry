@@ -4,6 +4,8 @@
  * Ported from DCC's src/daemon/routes/otel-opencode-logs.ts.
  * Discriminated by the `event.name` attribute, mirroring otel-codex-logs.ts.
  */
+import type { TelemetryConfig } from '../config.js';
+import { shouldCollect, inferAgentKey } from '../utils/filter.js';
 import type { OtlpAttribute } from './types.js';
 
 type OpencodeOtlpLogRecord = {
@@ -64,10 +66,15 @@ export function parseOpencodeOtlpLogRecord(
   record: OpencodeOtlpLogRecord,
   userId: string | null,
   resourceJson: string,
+  config?: TelemetryConfig,
 ): OpencodeLogEventInsert | null {
   const attrs = record.attributes ?? [];
   const eventName = getStringAttr(attrs, 'event.name');
   if (!eventName) return null;
+
+  // Config-based filtering: check if this event should be collected
+  const agentsConfig = config?.agents ?? {};
+  if (!shouldCollect(eventName, inferAgentKey(eventName), 'log_events', agentsConfig)) return null;
 
   const hasMcpServer = getStringAttr(attrs, 'mcp_server') !== undefined;
   const category = getCategory(eventName, hasMcpServer);

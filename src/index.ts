@@ -14,9 +14,19 @@ import { startMetricsReporter, stopMetricsReporter } from './reporters/metrics.j
 
 export async function startTelemetry(configOverrides?: Partial<TelemetryConfig>) {
   const config = loadConfig(configOverrides);
-  setLogLevel(config.logLevel);
+  setLogLevel(config.log_level);
 
-  initDb(config.dataDir);
+  logger.info('Agent Telemetry starting', {
+    dataDir: config.data_dir,
+    collectLogs: config.collect_logs,
+    collectMetrics: config.collect_metrics,
+    collectTraces: config.collect_traces,
+    agents: Object.keys(config.agents).length,
+    forwarders: config.otlp_forwarders.filter((f) => f.enabled).length,
+    upstream: config.upstream.url ? 'enabled' : 'disabled',
+  });
+
+  initDb(config.data_dir);
 
   const server = startOtlpServer(config);
   startLogEventsReporter(config);
