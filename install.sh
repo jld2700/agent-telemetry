@@ -46,8 +46,8 @@ OS="$(uname -s)"
 ARCH="$(uname -m)"
 
 case "$OS" in
-    Darwin) PLATFORM="macos" ;;
-    Linux)  PLATFORM="linux" ;;
+    Darwin) PLATFORM="macos"; RELEASE_PLATFORM="darwin" ;;
+    Linux)  PLATFORM="linux"; RELEASE_PLATFORM="linux" ;;
     *)      err "Unsupported OS: $OS"; exit 1 ;;
 esac
 
@@ -135,7 +135,7 @@ get_binary() {
     fi
 
     # Parse the download URL from release info (look for matching asset)
-    local ASSET_PATTERN="agent-telemetry-${PLATFORM}-${ARCH_NORMALIZED}"
+    local ASSET_PATTERN="agent-telemetry-${RELEASE_PLATFORM}-${ARCH_NORMALIZED}"
     DOWNLOAD_URL=$(echo "$RELEASE_INFO" | grep -o "https://[^\"']*${ASSET_PATTERN}[^\"']*" | head -1 || echo "")
 
     if [[ -z "$DOWNLOAD_URL" ]]; then
@@ -144,7 +144,7 @@ get_binary() {
     fi
 
     if [[ -z "$DOWNLOAD_URL" ]]; then
-        err "No matching binary found in latest release for ${PLATFORM}-${ARCH_NORMALIZED}"
+        err "No matching binary found in latest release for ${RELEASE_PLATFORM}-${ARCH_NORMALIZED}"
         err "Install bun (https://bun.sh) and clone the repo to build from source."
         return 1
     fi

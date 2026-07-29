@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: bun-darwin-arm64
+            artifact: agent-telemetry-darwin-arm64
+          - os: macos-13
+            target: bun-darwin-x64
+            artifact: agent-telemetry-darwin-x64
+          - os: ubuntu-latest
+            target: bun-linux-x64
+            artifact: agent-telemetry-linux-x64
+          - os: ubuntu-latest
+            target: bun-linux-arm64
+            artifact: agent-telemetry-linux-arm64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: bun build src/cli.ts --compile --target ${{ matrix.target }} --outfile ${{ matrix.artifact }}
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact }}
