@@ -5,3 +5,5 @@ dist/
 *.db-shm
 .env
 agent-telemetry
+agent-telemetry-darwin-*
+agent-telemetry-linux-*
